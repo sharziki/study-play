@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -25,6 +26,7 @@ STATE = ROOT / ".study"
 DB_PATH = STATE / "study.db"
 LOG_PATH = STATE / "claude.log"
 CTRL_EXIT = "\x05"
+DEFAULT_RECALL_THRESHOLD = 0.65
 
 
 class SeamlessExit(Exception):
@@ -67,6 +69,33 @@ QUESTION_SCHEMA = {
 
 def now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def recall_threshold() -> float:
+    try:
+        value = float(os.environ.get("STUDY_RECALL_THRESHOLD", DEFAULT_RECALL_THRESHOLD))
+    except ValueError:
+        value = DEFAULT_RECALL_THRESHOLD
+    return min(0.95, max(0.10, value))
+
+
+def missing_key_terms(response: str, answer: str, limit: int = 6) -> list[str]:
+    stop = {
+        "the", "and", "that", "this", "with", "from", "into", "because", "where",
+        "what", "when", "which", "then", "than", "have", "has", "was", "were",
+        "for", "are", "but", "not", "its", "they", "their", "can", "will", "equals",
+        "evaluates", "regardless", "using", "states", "since",
+    }
+    response_tokens = set(re.findall(r"[a-z0-9]+", response.lower()))
+    answer_tokens = re.findall(r"[A-Za-z0-9]+", answer)
+    missing: list[str] = []
+    seen: set[str] = set()
+    for token in answer_tokens:
+        key = token.lower()
+        if key not in stop and (len(key) > 2 or key.isdigit()) and key not in response_tokens and key not in seen:
+            missing.append(token)
+            seen.add(key)
+    return missing[:limit]
 
 
 def connect(path: Path = DB_PATH) -> sqlite3.Connection:
@@ -731,10 +760,15 @@ def print_question_header(
     print("─" * width)
     difficulty = ("Warm-up", "Easy", "Focused", "Hard", "Expert")[q["difficulty"] - 1]
     mode_color = "1;30;46" if mode == "RECOGNITION" else "1;37;45"
+    threshold = recall_threshold()
+    mastery_status = (
+        f"mastery {mastery:.0%} · recall unlock {threshold:.0%}"
+        if mode == "RECOGNITION" else f"mastery {mastery:.0%} · true recall unlocked"
+    )
     print(
         color(f" {mode} ", mode_color) + " " +
         color(f" {difficulty.upper()} {q['difficulty']}/5 ", "1;30;43") +
-        color(f"  mastery {mastery:.0%}", "2")
+        color(f"  {mastery_status}", "2")
     )
     print(color(wrap(q["topic"], width), "1;37"))
     print()
@@ -823,7 +857,7 @@ def play(limit: int) -> None:
             width = terminal_width()
             choice_data = multiple_choices(db, q)
             mastery = concept_mastery(db, q["topic"])
-            recognition = mastery < 0.65 and choice_data is not None
+            recognition = mastery < recall_threshold() and choice_data is not None
             mode = "RECOGNITION" if recognition else "TRUE RECALL"
             clear()
             print_question_header(
@@ -853,6 +887,11 @@ def play(limit: int) -> None:
                 print(card("Your answer", response_text or "I don't know yet.", width, "36"))
                 print()
                 print(card("Correct answer", q["answer"], width, "32"))
+                missing = missing_key_terms(response_text, q["answer"])
+                if missing:
+                    print(color("\nMISSING SIGNALS  ", "1;33") + " · ".join(missing))
+                else:
+                    print(color("\nCORE SIGNALS MATCHED", "1;32"))
                 grade = select_menu(
                     "GRADE YOUR RECALL",
                     [
@@ -962,6 +1001,50 @@ def status() -> None:
         print("\n".join(lines) or "(empty; worker starting)")
 
 
+def doctor() -> None:
+    checks: list[tuple[str, bool, str]] = []
+    checks.append(("Python", sys.version_info >= (3, 11), sys.version.split()[0]))
+
+    claude = shutil.which("claude")
+    authenticated = False
+    auth_detail = "CLI not found"
+    if claude:
+        try:
+            result = subprocess.run(
+                [claude, "auth", "status", "--json"],
+                text=True,
+                capture_output=True,
+                timeout=8,
+            )
+            payload = json.loads(result.stdout) if result.returncode == 0 else {}
+            authenticated = bool(payload.get("loggedIn"))
+            auth_detail = payload.get("authMethod", "not authenticated")
+        except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+            auth_detail = "auth check failed"
+    checks.append(("Claude", authenticated, auth_detail))
+
+    try:
+        with connect() as db:
+            integrity = db.execute("PRAGMA quick_check").fetchone()[0]
+            materials = db.execute("SELECT COUNT(*) FROM materials").fetchone()[0]
+            ready = db.execute("SELECT COUNT(*) FROM questions WHERE status='ready'").fetchone()[0]
+        checks.append(("Database", integrity == "ok", integrity))
+        checks.append(("Content", materials > 0 and ready > 0, f"{materials} materials · {ready} questions"))
+    except sqlite3.Error as error:
+        checks.append(("Database", False, str(error)))
+
+    print(color(" STUDY DOCTOR ", "1;30;46"))
+    for name, passed, detail in checks:
+        badge = color(" PASS ", "1;30;42") if passed else color(" FIX  ", "1;30;43")
+        print(f"{badge}  {name:<10} {detail}")
+    if all(passed for _, passed, _ in checks):
+        print(color("\nReady to play.", "1;32"))
+    elif not authenticated:
+        print(color("\nNext: run `claude auth login`, then `study doctor`.", "1;33"))
+    else:
+        print(color("\nNext: import an example from `examples/`.", "1;33"))
+
+
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Active recall, terminal native.")
     sub = p.add_subparsers(dest="command")
@@ -976,6 +1059,7 @@ def parser() -> argparse.ArgumentParser:
     sub.add_parser("stats")
     sub.add_parser("pet", help="show Nyx, streak, and milestones")
     sub.add_parser("status")
+    sub.add_parser("doctor", help="check Claude, database, and content health")
     return p
 
 
@@ -995,6 +1079,8 @@ def main() -> None:
             show_pet()
         elif command == "status":
             status()
+        elif command == "doctor":
+            doctor()
     except SeamlessExit:
         pass
 

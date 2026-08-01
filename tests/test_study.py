@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from datetime import timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 import study
 
@@ -16,6 +17,20 @@ class StudyTest(unittest.TestCase):
         self.assertEqual(study.rank_state(0), ("E", 200))
         self.assertEqual(study.rank_state(500), ("C", 1000))
         self.assertEqual(study.rank_state(4000), ("S", None))
+
+    def test_recall_threshold_is_configurable_and_bounded(self):
+        with patch.dict("os.environ", {"STUDY_RECALL_THRESHOLD": "0.55"}):
+            self.assertEqual(study.recall_threshold(), 0.55)
+        with patch.dict("os.environ", {"STUDY_RECALL_THRESHOLD": "2"}):
+            self.assertEqual(study.recall_threshold(), 0.95)
+
+    def test_typed_recall_surfaces_only_missing_key_terms(self):
+        missing = study.missing_key_terms(
+            "Net work changes kinetic energy.",
+            "Final kinetic energy is 70 J because net work equals its change.",
+        )
+        self.assertIn("70", missing)
+        self.assertNotIn("kinetic", [word.lower() for word in missing])
 
     def test_cards_have_consistent_width(self):
         rendered = study.card("Question", "A long sentence that wraps cleanly.", 52)

@@ -53,6 +53,15 @@ study import path/to/notes.md
 study play
 ```
 
+No notes ready? Start with a bundled deck:
+
+```bash
+study import examples/newton.md
+study play
+```
+
+Also included: `examples/discrete-math.md` and `examples/spanish-basics.md`.
+
 Import starts question generation in the background. Check it with:
 
 ```bash
@@ -89,6 +98,13 @@ study generate            # generate questions in foreground
 study pet                 # Nyx, shards, streak, milestones
 study stats               # local learning stats
 study status              # stats + Claude worker log
+study doctor              # Claude auth, DB, and content health
+```
+
+Set when concepts switch from choices to typed recall:
+
+```bash
+STUDY_RECALL_THRESHOLD=0.55 study play   # default: 0.65
 ```
 
 ## Requirements
