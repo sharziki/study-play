@@ -32,6 +32,19 @@ class StudyTest(unittest.TestCase):
         self.assertIn("70", missing)
         self.assertNotIn("kinetic", [word.lower() for word in missing])
 
+    def test_auto_scoring_only_handles_clear_cases(self):
+        exact = study.recall_score("Net work changes kinetic energy", "Net work changes kinetic energy")
+        vague = study.recall_score("energy changes", "Net work changes kinetic energy")
+        self.assertEqual(study.automatic_rating(exact, 5), "good")
+        self.assertIsNone(study.automatic_rating(vague, 5))
+        self.assertEqual(study.automatic_rating(0.0, 2), "again")
+
+    def test_generation_gate_rejects_short_quotes_and_near_copies(self):
+        material = "Net work equals the change in kinetic energy for an object."
+        self.assertFalse(study.generation_quality_ok(material, "Net work equals", "Net work"))
+        self.assertFalse(study.generation_quality_ok(material, material, material))
+        self.assertTrue(study.generation_quality_ok(material, material, "Its kinetic energy changes."))
+
     def test_cards_have_consistent_width(self):
         rendered = study.card("Question", "A long sentence that wraps cleanly.", 52)
         self.assertTrue(all(len(line) == 52 for line in rendered.splitlines()))

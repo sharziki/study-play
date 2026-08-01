@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from difflib import SequenceMatcher
 import hashlib
 import json
 import os
@@ -96,6 +97,27 @@ def missing_key_terms(response: str, answer: str, limit: int = 6) -> list[str]:
             missing.append(token)
             seen.add(key)
     return missing[:limit]
+
+
+def recall_score(response: str, answer: str) -> float:
+    answer_terms = {
+        token.lower() for token in re.findall(r"[A-Za-z0-9]+", answer)
+        if len(token) > 2 or token.isdigit()
+    }
+    response_terms = set(re.findall(r"[a-z0-9]+", response.lower()))
+    coverage = len(answer_terms & response_terms) / len(answer_terms) if answer_terms else 0.0
+    normalized_response = " ".join(re.findall(r"[a-z0-9]+", response.lower()))
+    normalized_answer = " ".join(re.findall(r"[a-z0-9]+", answer.lower()))
+    similarity = SequenceMatcher(None, normalized_response, normalized_answer).ratio()
+    return min(1.0, coverage * 0.8 + similarity * 0.2)
+
+
+def automatic_rating(score: float, confidence: int) -> str | None:
+    if confidence >= 4 and score >= 0.88:
+        return "good"
+    if confidence <= 2 and score <= 0.12:
+        return "again"
+    return None
 
 
 def connect(path: Path = DB_PATH) -> sqlite3.Connection:
@@ -271,6 +293,19 @@ MATERIAL:
     return payload["questions"]
 
 
+def generation_quality_ok(material: str, quote: str, answer: str) -> bool:
+    if len(quote) < 24 or quote not in material:
+        return False
+    normalized_quote = " ".join(re.findall(r"[a-z0-9]+", quote.lower()))
+    normalized_answer = " ".join(re.findall(r"[a-z0-9]+", answer.lower()))
+    near_copy = (
+        len(normalized_answer.split()) >= 5
+        and normalized_answer in normalized_quote
+        and len(normalized_answer) / max(1, len(normalized_quote)) > 0.75
+    )
+    return not near_copy
+
+
 def save_questions(db: sqlite3.Connection, material: sqlite3.Row, questions: list[dict]) -> int:
     saved = 0
     for q in questions:
@@ -279,7 +314,7 @@ def save_questions(db: sqlite3.Connection, material: sqlite3.Row, questions: lis
         correct_choice = int(q.get("correct_choice", -1))
         answer = q["answer"].strip()
         if (
-            not quote or quote not in material["content"] or len(choices) != 4
+            not generation_quality_ok(material["content"], quote, answer) or len(choices) != 4
             or len(set(choices)) != 4 or correct_choice not in range(4)
             or choices[correct_choice] != answer
         ):
@@ -593,6 +628,7 @@ def select_menu(
     initial: int = 0,
     shortcuts: dict[str, int] | None = None,
     labels: list[str] | None = None,
+    hint: str | None = None,
 ) -> int:
     shortcuts = shortcuts or {}
     if not sys.stdin.isatty():
@@ -624,8 +660,8 @@ def select_menu(
                 print("\033[2K\r" + prefix + " " + value)
             if labels:
                 print("\033[2K\r")
-        hint = " ↑↓ move   A–D choose   Enter select   Ctrl+E exit" if labels else " ↑↓ move   Enter select   Ctrl+E exit"
-        print("\033[2K\r" + color(hint, "2"))
+        footer = hint or (" ↑↓ move   A–D choose   Enter select   Ctrl+E exit" if labels else " ↑↓ move   Enter select   Ctrl+E exit")
+        print("\033[2K\r" + color(footer, "2"))
 
     def choose(index: int) -> int:
         # Remove completed decision so only current task remains onscreen.
@@ -674,9 +710,30 @@ def prompt_confidence(width: int) -> int:
         ["Safe  ·  +0 XP", "Bold  ·  +3 XP", "Locked  ·  +6 XP"],
         width,
         initial=1,
-        shortcuts={"1": 0, "2": 1, "3": 2},
+        shortcuts={"1": 0, "2": 1, "3": 2, "b": -1, "e": -2},
+        hint=" ↑↓ move   Enter select   B bury   E edit   Ctrl+E exit",
     )
+    if selected < 0:
+        return selected
     return (2, 4, 5)[selected]
+
+
+def edit_question(db: sqlite3.Connection, question: sqlite3.Row, width: int) -> None:
+    clear()
+    print(color(" QUICK EDIT ", "1;30;46") + color("  Enter keeps current text", "2"))
+    print(card("Question", question["prompt"], width, "36"))
+    prompt = read_line(color("\nNew question > ", "1;37")) or question["prompt"]
+    print(card("Answer", question["answer"], width, "32"))
+    answer = read_line(color("\nNew answer > ", "1;37")) or question["answer"]
+    print(card("Explanation", question["explanation"], width, "33"))
+    explanation = read_line(color("\nNew explanation > ", "1;37")) or question["explanation"]
+    db.execute(
+        """UPDATE questions SET prompt=?, answer=?, explanation=?,
+           choices_json='[]', correct_choice=-1 WHERE id=?""",
+        (prompt.strip(), answer.strip(), explanation.strip(), question["id"]),
+    )
+    db.commit()
+    print(color("\n SAVED  QUESTION RETURNS WITH UPDATED TEXT ", "1;30;42"))
 
 
 def prompt_answer() -> str | None:
@@ -840,6 +897,34 @@ def print_reward_feedback(
         print(color(f"NEXT  {next_goal}", "2"))
 
 
+def print_session_summary(
+    db: sqlite3.Connection,
+    session_xp: int,
+    concept_deltas: dict[str, float],
+) -> None:
+    profile = db.execute("SELECT * FROM profile WHERE id=1").fetchone()
+    due = db.execute(
+        """SELECT q.topic, p.due_at FROM progress p JOIN questions q ON q.id=p.question_id
+           WHERE q.status='ready' ORDER BY p.due_at LIMIT 1"""
+    ).fetchone()
+    up = [f"{topic} +{delta:.0%}" for topic, delta in concept_deltas.items() if delta > 0]
+    down = [f"{topic} {delta:.0%}" for topic, delta in concept_deltas.items() if delta < 0]
+    _, _, next_at = companion_state(profile["xp"])
+    nyx = "max evolution" if next_at is None else f"{next_at - profile['xp']} XP to evolve"
+    if due:
+        wait = max(0, (datetime.fromisoformat(due["due_at"]) - now()).total_seconds())
+        due_in = "now" if wait < 60 else f"{int(wait // 60)}m" if wait < 3600 else f"{int(wait // 3600)}h" if wait < 86400 else f"{int(wait // 86400)}d"
+        next_due = f"{due['topic']} in {due_in}"
+    else:
+        next_due = "free run ready"
+    clear()
+    print(color(" DUNGEON CLEAR ", "1;30;46") + color(f"  +{session_xp} XP", "1;32"))
+    print(color("GROWTH  ", "1;36") + (" · ".join(up) if up else "no mastery movement"))
+    print(color("RETRAIN ", "1;33") + (" · ".join(down) if down else "none"))
+    print(color("NYX     ", "1;35") + nyx)
+    print(color("NEXT    ", "2") + next_due)
+
+
 def play(limit: int) -> None:
     with connect() as db:
         queue = due_questions(db, limit)
@@ -850,6 +935,7 @@ def play(limit: int) -> None:
             print("No questions ready. Import material or check .study/claude.log.")
             return
         session_xp = 0
+        concept_deltas: dict[str, float] = {}
         for index, q in enumerate(queue, 1):
             profile = db.execute("SELECT * FROM profile WHERE id=1").fetchone()
             boss = index % 5 == 0
@@ -878,8 +964,16 @@ def play(limit: int) -> None:
                 correct = None
             response_seconds = time.monotonic() - started
             confidence = prompt_confidence(width)
-            if confidence is None:
-                break
+            if confidence == -1:
+                db.execute("UPDATE questions SET status='buried' WHERE id=?", (q["id"],))
+                db.commit()
+                print(color("\n BURIED  REMOVED FROM FUTURE RUNS ", "1;30;43"))
+                time.sleep(0.35)
+                continue
+            if confidence == -2:
+                edit_question(db, q, width)
+                time.sleep(0.35)
+                continue
             if recognition:
                 rating = "good" if correct else "again"
             else:
@@ -892,24 +986,30 @@ def play(limit: int) -> None:
                     print(color("\nMISSING SIGNALS  ", "1;33") + " · ".join(missing))
                 else:
                     print(color("\nCORE SIGNALS MATCHED", "1;32"))
-                grade = select_menu(
-                    "GRADE YOUR RECALL",
-                    [
-                        "Again  ·  retry soon",
-                        "Hard   ·  needs work",
-                        "Good   ·  recalled",
-                        "Easy   ·  mastered",
-                        "Bury question",
-                    ],
-                    width,
-                    initial=2,
-                    shortcuts={"a": 0, "h": 1, "g": 2, "e": 3, "b": 4},
-                )
-                if grade == 4:
-                    db.execute("UPDATE questions SET status='buried' WHERE id=?", (q["id"],))
-                    db.commit()
-                    continue
-                rating = ("again", "hard", "good", "easy")[grade]
+                score = recall_score(response_text, q["answer"])
+                rating = automatic_rating(score, confidence)
+                if rating:
+                    print(color(f"  AUTO-SCORED {rating.upper()}  ·  match {score:.0%}", "1;30;42" if rating == "good" else "1;30;43"))
+                else:
+                    suggested = 0 if score < 0.25 else 1 if score < 0.55 else 2
+                    grade = select_menu(
+                        f"GRADE YOUR RECALL  ·  estimated match {score:.0%}",
+                        [
+                            "Again  ·  retry soon",
+                            "Hard   ·  needs work",
+                            "Good   ·  recalled",
+                            "Easy   ·  mastered",
+                            "Bury question",
+                        ],
+                        width,
+                        initial=suggested,
+                        shortcuts={"a": 0, "h": 1, "g": 2, "e": 3, "b": 4},
+                    )
+                    if grade == 4:
+                        db.execute("UPDATE questions SET status='buried' WHERE id=?", (q["id"],))
+                        db.commit()
+                        continue
+                    rating = ("again", "hard", "good", "easy")[grade]
             milestones_before = set(milestone_state(db)[0])
             old_xp = profile["xp"]
             xp, pressure_bonus, shards = record_review(
@@ -921,6 +1021,7 @@ def play(limit: int) -> None:
             new_mastery = db.execute(
                 "SELECT mastery FROM progress WHERE question_id=?", (q["id"],)
             ).fetchone()[0]
+            concept_deltas[q["topic"]] = concept_deltas.get(q["topic"], 0.0) + new_mastery - q["mastery"]
             session_xp += xp
             print_reward_feedback(
                 old_xp,
@@ -941,7 +1042,7 @@ def play(limit: int) -> None:
             next_key = read_key(color("  Enter → next", "2"), {"\r", "\n", CTRL_EXIT})
             if next_key == CTRL_EXIT:
                 return
-        print("\n" + color(" DUNGEON CLEAR ", "1;30;46") + color(f"  RUN TOTAL +{session_xp} XP", "1;32"))
+        print_session_summary(db, session_xp, concept_deltas)
 
 
 def stats() -> None:

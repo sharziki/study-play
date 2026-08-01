@@ -87,6 +87,8 @@ Every fifth question is a boss round. Strong retrieval can drop shards. XP evolv
 | `↑` / `↓` | Move selection |
 | `Enter` | Confirm |
 | `A`–`D` or `1`–`4` | Choose directly |
+| `B` at the stake screen | Bury a bad question |
+| `E` at the stake screen | Quick-edit question, answer, and explanation |
 | `Ctrl+E` | Exit anywhere |
 
 ## Commands
@@ -114,6 +116,8 @@ STUDY_RECALL_THRESHOLD=0.55 study play   # default: 0.65
 - A terminal with ANSI color support
 
 No Python packages. No hosted database. Study history stays in `.study/study.db`, which Git ignores.
+
+Typed recall uses conservative local scoring. Clear high-confidence matches and clear low-confidence misses are graded automatically; ambiguous answers still ask you. Session exit stays under five lines: mastery growth, regressions, Nyx progress, and next due concept.
 
 ## Grounding and safety
 
