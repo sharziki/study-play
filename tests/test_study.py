@@ -45,6 +45,22 @@ class StudyTest(unittest.TestCase):
         self.assertFalse(study.generation_quality_ok(material, material, material))
         self.assertTrue(study.generation_quality_ok(material, material, "Its kinetic energy changes."))
 
+    def test_transfer_questions_land_in_boss_slots(self):
+        rows = [
+            {"id": index, "kind": "transfer" if index in {1, 7} else "recall"}
+            for index in range(10)
+        ]
+        arranged = study.arrange_boss_transfers(rows)
+        self.assertEqual(arranged[4]["kind"], "transfer")
+        self.assertEqual(arranged[9]["kind"], "transfer")
+        self.assertEqual({row["id"] for row in arranged}, set(range(10)))
+
+    def test_generation_retries_when_transfer_mix_is_missing(self):
+        recalls = [{"kind": "recall"} for _ in range(10)]
+        mixed = [*recalls[:8], {"kind": "transfer"}, {"kind": "transfer"}]
+        self.assertEqual(study.transfer_retry_count(recalls, 10), 4)
+        self.assertEqual(study.transfer_retry_count(mixed, 10), 0)
+
     def test_cards_have_consistent_width(self):
         rendered = study.card("Question", "A long sentence that wraps cleanly.", 52)
         self.assertTrue(all(len(line) == 52 for line in rendered.splitlines()))

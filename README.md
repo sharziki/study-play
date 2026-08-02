@@ -78,7 +78,7 @@ study status
 | **Feedback** | See correction, XP, mastery movement, Heat, and quest progress. |
 | **Spacing** | Weak spots return soon; mastered questions fade out. |
 
-Every fifth question is a boss round. Strong retrieval can drop shards. XP evolves Nyx and advances your E→S rank. Misses never remove progress: they reveal the correction, earn honest-effort XP, and schedule another attempt.
+Every fifth question is a boss round. Generated questions are labeled recall, explanation, or transfer; the scheduler places transfer/application prompts into boss slots when available. Strong retrieval can drop shards. XP evolves Nyx and advances your E→S rank. Misses never remove progress: they reveal the correction, earn honest-effort XP, and schedule another attempt.
 
 ## Controls
 

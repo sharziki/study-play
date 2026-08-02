@@ -41,7 +41,7 @@
 
 - Reward: attempts, correct retrieval, honest confidence, and comeback after errors.
 - Strong retrieval can trigger a small random shard drop. Surprise changes reward timing, never correctness or scheduling.
-- Every fifth prompt is a boss round: visible time target, bonus for beating it, zero penalty for missing it.
+- Every fifth prompt is a boss round: prefer a transfer/application question, show a time target, reward beating it, and apply zero penalty for missing it.
 - Never reward: time open, question volume alone, or easy-question farming.
 - Streak is a session combo, not a daily hostage mechanic.
 - Failure reveals precise feedback and reschedules quickly; no punitive animation.
