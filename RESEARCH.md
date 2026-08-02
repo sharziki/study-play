@@ -47,6 +47,7 @@
 - Failure reveals precise feedback and reschedules quickly; no punitive animation.
 - Clear typed-recall matches may be auto-scored locally; ambiguous paraphrases remain learner-graded.
 - Bad content must be removable or editable in one action before it can damage trust.
+- Confidence calibration and response pace may adjust mastery slightly, but never outweigh retrieval correctness.
 - User keeps autonomy: choose material, quit anytime, bury bad questions.
 - Difficulty targets edge of ability. Mastered items retire; saved time is the reward.
 - Question mix: 60% weak/due, 20% new, 20% mastered keep-alive; rotate topics.

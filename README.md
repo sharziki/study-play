@@ -117,7 +117,7 @@ STUDY_RECALL_THRESHOLD=0.55 study play   # default: 0.65
 
 No Python packages. No hosted database. Study history stays in `.study/study.db`, which Git ignores.
 
-Typed recall uses conservative local scoring. Clear high-confidence matches and clear low-confidence misses are graded automatically; ambiguous answers still ask you. Session exit stays under five lines: mastery growth, regressions, Nyx progress, and next due concept.
+Typed recall uses conservative local scoring. Clear high-confidence matches and clear low-confidence misses are graded automatically; ambiguous answers still ask you. Recall quality remains the main mastery signal, with small adjustments for pre-reveal confidence calibration and response pace. Perfect high-confidence retrieval also gets a small shard-drop boost. Session exit stays under five lines: mastery growth, regressions, Nyx progress, and next due concept.
 
 ## Grounding and safety
 

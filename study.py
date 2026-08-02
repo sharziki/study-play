@@ -400,6 +400,34 @@ def award_xp(rating: str, confidence: int, combo: int) -> tuple[int, int]:
     return base + stake_bonus + honesty_bonus + min(new_combo, 5), new_combo
 
 
+def mastery_observation(
+    rating: str,
+    confidence: int,
+    response_seconds: float,
+    target_seconds: float,
+) -> float:
+    score = {"again": 0.0, "hard": 0.45, "good": 0.8, "easy": 1.0}[rating]
+    strong = rating in {"good", "easy"}
+    if strong:
+        score += 0.04 if confidence == 5 else -0.02 if confidence <= 2 else 0.0
+        score += 0.03 if response_seconds <= target_seconds else -0.03 if response_seconds > target_seconds * 2 else 0.0
+    else:
+        score += 0.02 if confidence <= 2 else -0.08 if confidence == 5 else 0.0
+    return min(1.0, max(0.0, score))
+
+
+def shard_drop_chance(difficulty: int, combo: int, confidence: int) -> float:
+    calibration_bonus = 0.05 if confidence == 5 else 0.0
+    return min(0.08 + 0.03 * difficulty + 0.02 * combo + calibration_bonus, 0.40)
+
+
+def calibration_label(rating: str, confidence: int) -> str:
+    strong = rating in {"good", "easy"}
+    if (strong and confidence >= 4) or (not strong and confidence <= 2):
+        return "CALIBRATED"
+    return "UNDERSTATED" if strong else "OVERSTATED"
+
+
 def next_interval(current: float, rating: str) -> timedelta:
     if rating == "again":
         return timedelta(minutes=10)
@@ -424,12 +452,12 @@ def record_review(
     target_seconds = 25 + q["difficulty"] * 10
     pressure_bonus = q["difficulty"] * 2 if boss and rating in {"good", "easy"} and response_seconds <= target_seconds else 0
     xp += pressure_bonus
-    drop_chance = min(0.08 + 0.03 * q["difficulty"] + 0.02 * combo, 0.35)
+    drop_chance = shard_drop_chance(q["difficulty"], combo, confidence)
     shards = random.randint(1, 3) if rating in {"good", "easy"} and random.random() < drop_chance else 0
     delta = next_interval(q["interval_days"], rating)
     interval_days = delta.total_seconds() / 86400
     reviewed = now()
-    score = {"again": 0.0, "hard": 0.45, "good": 0.8, "easy": 1.0}[rating]
+    score = mastery_observation(rating, confidence, response_seconds, target_seconds)
     mastery = q["mastery"] * 0.7 + score * 0.3
     today = reviewed.date().isoformat()
     yesterday = (reviewed.date() - timedelta(days=1)).isoformat()
@@ -804,7 +832,7 @@ def print_question_header(
     print("─" * width)
     print(
         color(f"RANK {rank}", "1;35") + color(f"  LV {level}", "1;36") + "  " + color(progress_bar(level_progress), "36") +
-        f"  {level_progress}/100    " + color(f"HEAT {profile['combo']}", "1;33") +
+        f"  {level_progress}/100    " + color(f"HEAT ×{profile['combo']}", "1;33") +
         "    " + color(f"STREAK {profile['daily_streak']}d", "1;32")
     )
     companion, art, _ = companion_state(profile["xp"])
@@ -845,6 +873,9 @@ def print_reward_feedback(
     total: int,
     pressure_bonus: int,
     shards: int,
+    confidence: int,
+    response_seconds: float,
+    target_seconds: int,
     unlocked: set[str],
     next_goal: str | None,
 ) -> None:
@@ -879,8 +910,13 @@ def print_reward_feedback(
     print(
         color(f"MASTERY {old_mastery:.0%} → {new_mastery:.0%}", "1;36") +
         color(f"  +{mastery_delta:.0%}", "1;32") + "    " +
-        color(f"HEAT {profile['combo']}", "1;33") + "    " +
+        color(f"HEAT ×{profile['combo']}", "1;33") + "    " +
         color(f"STREAK {profile['daily_streak']}d", "1;32")
+    )
+    pace_color = "1;32" if response_seconds <= target_seconds else "2"
+    print(
+        color(f"CALIBRATION  {calibration_label(rating, confidence)}", "1;35") + "    " +
+        color(f"PACE  {response_seconds:.0f}s / {target_seconds}s", pace_color)
     )
     quest_progress = index * 100 // total
     print(color("QUEST  ", "1;36") + color(progress_bar(quest_progress, 24), "36") + f"  {index}/{total}")
@@ -1036,6 +1072,9 @@ def play(limit: int) -> None:
                 len(queue),
                 pressure_bonus,
                 shards,
+                confidence,
+                response_seconds,
+                target_seconds,
                 set(milestones_after) - milestones_before,
                 next_goal,
             )

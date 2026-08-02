@@ -58,6 +58,20 @@ class StudyTest(unittest.TestCase):
         self.assertEqual(miss_combo, 0)
         self.assertEqual(combo, 5)
 
+    def test_mastery_uses_calibration_and_pace_without_dominating_recall(self):
+        fast_calibrated = study.mastery_observation("good", 5, 10, 40)
+        slow_uncertain = study.mastery_observation("good", 2, 100, 40)
+        honest_miss = study.mastery_observation("again", 2, 10, 40)
+        overconfident_miss = study.mastery_observation("again", 5, 10, 40)
+        self.assertGreater(fast_calibrated, slow_uncertain)
+        self.assertGreater(honest_miss, overconfident_miss)
+        self.assertGreater(slow_uncertain, honest_miss)
+
+    def test_perfect_confidence_slightly_improves_shard_odds(self):
+        normal = study.shard_drop_chance(3, 2, 4)
+        perfect = study.shard_drop_chance(3, 2, 5)
+        self.assertAlmostEqual(perfect - normal, 0.05)
+
     def test_schedule_expands_and_resets(self):
         self.assertEqual(study.next_interval(4, "again"), timedelta(minutes=10))
         self.assertEqual(study.next_interval(4, "good"), timedelta(days=10))
