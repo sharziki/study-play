@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <title>Intellect — adaptive study</title>
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Primary navigation">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div><strong>Intellect</strong><small>your private study notebook</small></div>
+      </div>
+
+      <nav class="nav-stack">
+        <button class="nav-item is-active" data-view="dashboard" aria-current="page">
+          <span class="nav-icon">⌁</span><span>Today</span><kbd>T</kbd>
+        </button>
+        <button class="nav-item" data-view="library">
+          <span class="nav-icon">▦</span><span>Library</span><kbd>L</kbd>
+        </button>
+      </nav>
+
+      <div class="rail-section">
+        <div class="rail-label"><span>Tracks</span><button id="rail-add" aria-label="Add source material">+</button></div>
+        <div id="track-list" class="track-list" aria-live="polite"></div>
+      </div>
+
+      <div class="sidebar-bottom">
+        <div class="nyx-card">
+          <div class="nyx-orbit" aria-hidden="true"><i></i></div>
+          <div><span>Nyx · <b id="nyx-stage">Shadow Sprite</b></span><small id="nyx-progress">0 XP until evolution</small></div>
+        </div>
+        <button class="import-button" id="open-import"><span>＋</span> Add source</button>
+        <div class="sound-controls" aria-label="Sound settings">
+          <button id="sound-toggle" class="sound-toggle" aria-pressed="false" aria-label="Mute sound effects">♪</button>
+          <label for="volume-control"><span>Volume</span><input id="volume-control" type="range" min="0" max="100" value="35"></label>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main" id="main-content">
+      <section id="dashboard-view" class="view is-visible" aria-labelledby="dashboard-title">
+        <header class="topbar">
+          <div><span class="eyebrow">Today’s study note</span><h1 id="dashboard-title">Your next lesson is already chosen.</h1></div>
+          <div class="top-actions"><button class="icon-button" id="refresh-dashboard" aria-label="Refresh dashboard">↻</button><div class="rank-chip"><span>Rank</span><b id="rank">E</b></div></div>
+        </header>
+
+        <div class="dashboard-grid">
+          <section class="command-card">
+            <div class="command-copy">
+              <span class="signal"><i></i><span id="queue-label">A fresh set is ready</span></span>
+              <h2>Begin at<br><em>the frontier.</em></h2>
+              <p>A short sequence drawn from what is weak, what is due, and what deserves a harder proof. No deck sorting. No study-plan maintenance.</p>
+            </div>
+            <div class="command-controls">
+              <label for="campaign-select">Study from</label>
+              <select id="campaign-select"><option value="All">All tracks</option></select>
+              <div class="duration-group" aria-label="Sprint duration">
+                <button data-minutes="10">10<span>min</span></button>
+                <button data-minutes="20" class="is-selected">20<span>min</span></button>
+                <button data-minutes="35">35<span>min</span></button>
+              </div>
+              <button class="primary-action" id="start-sprint">Open today’s set <span>⌘↵</span></button>
+              <small>Quiet, focused, and stored only on this computer</small>
+            </div>
+            <div class="field-visual" id="hero-field" aria-hidden="true"></div>
+          </section>
+
+          <aside class="evidence-rail">
+            <div class="metric-card accent-card"><span>Due now</span><strong id="due-count">—</strong><small>highest-value recalls</small></div>
+            <div class="metric-card"><span>Strong recall</span><strong id="strong-recall">—</strong><small>good or easy ratings</small></div>
+            <div class="metric-card"><span>Knowledge base</span><strong id="question-count">—</strong><small id="material-count">across — sources</small></div>
+          </aside>
+        </div>
+
+        <section class="section-block" aria-labelledby="mastery-heading">
+          <div class="section-heading"><div><span class="eyebrow">Margin notes</span><h2 id="mastery-heading">What is beginning to hold</h2></div><span class="legend"><i></i> new <i></i> forming <i></i> fluent</span></div>
+          <div id="mastery-field" class="mastery-field"></div>
+        </section>
+
+        <div class="lower-grid">
+          <section class="section-block compact" aria-labelledby="tracks-heading">
+            <div class="section-heading"><div><span class="eyebrow">Courses</span><h2 id="tracks-heading">Your current lines of study</h2></div></div>
+            <div id="track-cards" class="track-cards"></div>
+          </section>
+          <section class="section-block compact" aria-labelledby="recent-heading">
+            <div class="section-heading"><div><span class="eyebrow">Reading shelf</span><h2 id="recent-heading">Recent material</h2></div><button class="text-button" id="inline-import">Add reading</button></div>
+            <div id="recent-materials" class="material-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="lesson-view" class="view lesson-view" aria-labelledby="lesson-title">
+        <header class="lesson-header">
+          <button class="exit-study" id="exit-lesson">← Exit</button>
+          <ol class="lesson-stages" aria-label="Lesson progress">
+            <li class="is-current" data-stage="teach"><span>1</span>Teach</li>
+            <li data-stage="check"><span>2</span>Check</li>
+            <li data-stage="challenge"><span>3</span>Challenge</li>
+          </ol>
+          <span id="lesson-xp" class="lesson-xp">0 XP</span>
+        </header>
+        <article class="lesson-page">
+          <div id="lesson-reading">
+            <p class="lesson-kicker"><span id="lesson-campaign">Putnam</span> · <span id="lesson-topic">Invariants</span></p>
+            <h1 id="lesson-title">Building the lesson…</h1>
+            <p id="lesson-objective" class="lesson-objective"></p>
+
+            <aside class="prerequisite-note"><span>Before we begin</span><ul id="lesson-prerequisites"></ul></aside>
+            <section class="lesson-section"><span class="lesson-number">01</span><div><h2>Why this idea exists</h2><p id="lesson-motivation"></p></div></section>
+            <section class="lesson-section"><span class="lesson-number">02</span><div><h2>The smallest pieces</h2><div id="lesson-primitives" class="primitive-list"></div></div></section>
+            <section class="lesson-section"><span class="lesson-number">03</span><div><h2>Build the proof, one reason at a time</h2><ol id="lesson-derivation" class="derivation-list"></ol></div></section>
+            <section class="lesson-section worked-section"><span class="lesson-number">04</span><div><h2>Work one completely</h2><div id="worked-example" class="worked-example"></div></div></section>
+            <aside class="misconception-note"><span>Common wrong turn</span><p id="lesson-misconception"></p></aside>
+            <details class="source-proof lesson-source"><summary>Grounded in your source</summary><blockquote id="lesson-source-quote"></blockquote><small id="lesson-material"></small></details>
+            <button id="begin-checks" class="primary-action lesson-continue">I understand the idea — check me <span>→</span></button>
+          </div>
+
+          <section id="lesson-checks" class="lesson-checks" hidden aria-labelledby="check-heading">
+            <p class="lesson-kicker">Scaffolded check <span id="check-count">1 / 2</span></p>
+            <h1 id="check-heading">Use the idea while the structure is still visible.</h1>
+            <p id="check-prompt" class="check-prompt"></p>
+            <div id="check-choices" class="check-choices"></div>
+            <div id="check-feedback" class="check-feedback" aria-live="polite" hidden>
+              <strong id="check-result"></strong><p id="check-explanation"></p><span id="check-reward"></span>
+            </div>
+            <button id="next-check" class="primary-action lesson-continue" hidden>Continue <span>→</span></button>
+          </section>
+        </article>
+      </section>
+
+      <section id="study-view" class="view study-view" aria-labelledby="question-heading">
+        <header class="study-header">
+          <button class="exit-study" id="exit-study">← Exit</button>
+          <div class="session-progress"><span id="session-count">1 / 12</span><div><i id="session-bar"></i></div><span id="session-timer">00:00</span></div>
+          <div class="study-meta"><span id="heat">Heat ×0</span><span id="study-xp">0 XP</span></div>
+        </header>
+
+        <div class="challenge-shell">
+          <div class="challenge-context">
+            <span class="mode-badge" id="mode-badge">True recall</span>
+            <span id="challenge-track">Putnam</span><span class="dot">·</span><span id="challenge-topic">Invariants</span>
+          </div>
+          <div class="boss-banner" id="boss-banner" hidden><span>Transfer gate</span><b id="boss-target">Beat 65s for bonus</b></div>
+          <h1 id="question-heading">Loading the next challenge…</h1>
+          <p class="question-source" id="question-material"></p>
+
+          <div id="choice-grid" class="choice-grid"></div>
+          <div id="recall-box" class="recall-box" hidden>
+            <label for="answer-input">Answer from memory</label>
+            <textarea id="answer-input" rows="5" placeholder="Derive it. State the key move. Keep only what matters."></textarea>
+            <span><kbd>⌘</kbd><kbd>↵</kbd> submit</span>
+          </div>
+
+          <fieldset class="confidence-field">
+            <legend>Lock confidence before reveal</legend>
+            <label><input type="radio" name="confidence" value="2"><span><b>Safe</b><small>uncertain</small></span></label>
+            <label><input type="radio" name="confidence" value="4" checked><span><b>Bold</b><small>likely right</small></span></label>
+            <label><input type="radio" name="confidence" value="5"><span><b>Locked</b><small>certain</small></span></label>
+          </fieldset>
+
+          <div class="challenge-actions"><button class="bury-button" id="bury-question">Bury</button><button class="submit-answer" id="submit-answer" disabled>Check answer <span>⌘↵</span></button></div>
+
+          <section id="feedback-panel" class="feedback-panel" aria-live="polite" hidden>
+            <div class="feedback-result"><span id="feedback-badge">Correction</span><strong id="feedback-score"></strong></div>
+            <div class="answer-block"><span>Expected answer</span><p id="expected-answer"></p></div>
+            <div class="explanation-block"><span>Why it works</span><p id="answer-explanation"></p></div>
+            <details class="source-proof"><summary>Source evidence</summary><blockquote id="source-quote"></blockquote></details>
+            <div id="manual-rating" class="manual-rating" hidden>
+              <span>How complete was your recall?</span>
+              <div><button data-rating="again">Again</button><button data-rating="hard">Hard</button><button data-rating="good">Good</button><button data-rating="easy">Easy</button></div>
+            </div>
+            <div id="reward-strip" class="reward-strip" hidden><span id="mastery-delta">Mastery +0%</span><span id="xp-delta">+0 XP</span><span id="calibration">Calibrated</span></div>
+            <button id="next-question" class="next-question" hidden>Next challenge <span>↵</span></button>
+          </section>
+        </div>
+      </section>
+
+      <section id="library-view" class="view" aria-labelledby="library-title">
+        <header class="topbar"><div><span class="eyebrow">Source library</span><h1 id="library-title">Everything enters through evidence.</h1></div><button class="primary-small" id="library-import">Add material</button></header>
+        <div class="library-intro"><p>Paste notes, syllabuses, proofs, or chapters. Intellect turns them into grounded recall and transfer challenges without surrendering scheduling state to the model.</p></div>
+        <div id="library-grid" class="library-grid"></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="import-dialog" aria-labelledby="import-title">
+    <form method="dialog" id="import-form">
+      <div class="dialog-head"><div><span class="eyebrow">Source intake</span><h2 id="import-title">Give Intellect something true.</h2></div><button value="cancel" class="dialog-close" aria-label="Close">×</button></div>
+      <p>Paste material or choose a PDF, text, Markdown, TeX, or CSV file. Every generated answer must point back to an exact quote.</p>
+      <div class="form-row"><label>Title<input id="import-title-input" name="title" required placeholder="Putnam — invariants notes"></label><label>Track<select id="import-campaign" name="campaign"><option>Putnam</option><option>Purdue CS</option><option>Purdue Math</option><option>General</option></select></label></div>
+      <label class="drop-zone" for="file-input"><input type="file" id="file-input" accept=".pdf,.txt,.md,.tex,.csv,application/pdf,text/plain,text/markdown"><span>Drop or choose a file</span><small>.pdf · .md · .txt · .tex · .csv</small></label>
+      <label>Material<textarea id="import-content" name="content" rows="12" placeholder="Paste the source material here…"></textarea></label>
+      <label class="check-row"><input type="checkbox" id="generate-now" checked><span>Generate grounded questions in the background</span></label>
+      <div class="dialog-actions"><button value="cancel" class="secondary-action">Cancel</button><button type="submit" value="default" class="primary-small">Import source</button></div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="achievement-popover" class="achievement-popover" role="status" aria-live="polite" hidden><span>Milestone</span><strong id="achievement-title">Concept unlocked</strong><small id="achievement-detail"></small></div>
+  <script src="/vendor/katex/katex.min.js" defer></script>
+  <script src="/vendor/katex/auto-render.min.js" defer></script>
+  <script src="/app.js" defer></script>
+</body>
+</html>

@@ -55,6 +55,11 @@ class StudyTest(unittest.TestCase):
         self.assertEqual(arranged[9]["kind"], "transfer")
         self.assertEqual({row["id"] for row in arranged}, set(range(10)))
 
+    def test_generation_batches_respect_structured_output_limit(self):
+        self.assertEqual(study.question_batches(30), [12, 12, 6])
+        self.assertEqual(study.question_batches(12), [12])
+        self.assertEqual(study.question_batches(1), [1])
+
     def test_generation_retries_when_transfer_mix_is_missing(self):
         recalls = [{"kind": "recall"} for _ in range(10)]
         mixed = [*recalls[:8], {"kind": "transfer"}, {"kind": "transfer"}]

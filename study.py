@@ -155,6 +155,26 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
           pressure_bonus INTEGER NOT NULL DEFAULT 0,
           response_text TEXT NOT NULL DEFAULT ''
         );
+        CREATE TABLE IF NOT EXISTS lessons (
+          id INTEGER PRIMARY KEY, material_id INTEGER NOT NULL REFERENCES materials(id),
+          topic TEXT NOT NULL, title TEXT NOT NULL, objective TEXT NOT NULL,
+          motivation TEXT NOT NULL, prerequisites_json TEXT NOT NULL DEFAULT '[]',
+          primitives_json TEXT NOT NULL DEFAULT '[]', derivation_steps_json TEXT NOT NULL DEFAULT '[]',
+          worked_example_json TEXT NOT NULL DEFAULT '{}', misconception TEXT NOT NULL,
+          checks_json TEXT NOT NULL DEFAULT '[]', source_quote TEXT NOT NULL,
+          created_at TEXT NOT NULL, UNIQUE(material_id, topic)
+        );
+        CREATE TABLE IF NOT EXISTS lesson_progress (
+          lesson_id INTEGER PRIMARY KEY REFERENCES lessons(id),
+          stage TEXT NOT NULL DEFAULT 'teach', current_check INTEGER NOT NULL DEFAULT 0,
+          correct_checks INTEGER NOT NULL DEFAULT 0, attempted_checks INTEGER NOT NULL DEFAULT 0,
+          xp_earned INTEGER NOT NULL DEFAULT 0, completed_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS lesson_attempts (
+          id INTEGER PRIMARY KEY, lesson_id INTEGER NOT NULL REFERENCES lessons(id),
+          check_index INTEGER NOT NULL, selected_choice INTEGER NOT NULL,
+          correct INTEGER NOT NULL, xp INTEGER NOT NULL DEFAULT 0, attempted_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS profile (
           id INTEGER PRIMARY KEY CHECK (id = 1), xp INTEGER NOT NULL DEFAULT 0,
           combo INTEGER NOT NULL DEFAULT 0, best_combo INTEGER NOT NULL DEFAULT 0,
@@ -165,10 +185,13 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
         """
     )
     # Small forward-only migrations keep old local databases usable.
+    material_columns = {row[1] for row in db.execute("PRAGMA table_info(materials)")}
     review_columns = {row[1] for row in db.execute("PRAGMA table_info(reviews)")}
     question_columns = {row[1] for row in db.execute("PRAGMA table_info(questions)")}
     progress_columns = {row[1] for row in db.execute("PRAGMA table_info(progress)")}
     profile_columns = {row[1] for row in db.execute("PRAGMA table_info(profile)")}
+    if "campaign" not in material_columns:
+        db.execute("ALTER TABLE materials ADD COLUMN campaign TEXT NOT NULL DEFAULT 'General'")
     if "response_seconds" not in review_columns:
         db.execute("ALTER TABLE reviews ADD COLUMN response_seconds REAL NOT NULL DEFAULT 0")
     if "pressure_bonus" not in review_columns:
@@ -308,6 +331,18 @@ MATERIAL:
     return payload["questions"]
 
 
+def question_batches(count: int) -> list[int]:
+    """Split a requested total into calls allowed by the structured-output schema."""
+    maximum = int(QUESTION_SCHEMA["properties"]["questions"]["maxItems"])
+    remaining = max(1, int(count))
+    batches: list[int] = []
+    while remaining:
+        size = min(maximum, remaining)
+        batches.append(size)
+        remaining -= size
+    return batches
+
+
 def generation_quality_ok(material: str, quote: str, answer: str) -> bool:
     if len(quote) < 24 or quote not in material:
         return False
@@ -370,7 +405,12 @@ def generate(material_id: int | None, count: int) -> None:
         total = 0
         for material in materials:
             print(f"Generating from {material['title']}…", flush=True)
-            questions = claude_questions(material, history, count)
+            questions: list[dict] = []
+            batches = question_batches(count)
+            for index, batch_size in enumerate(batches, 1):
+                if len(batches) > 1:
+                    print(f"Batch {index}/{len(batches)}: requesting {batch_size} questions…", flush=True)
+                questions.extend(claude_questions(material, history, batch_size))
             retry_count = transfer_retry_count(questions, count)
             if retry_count:
                 print(f"Transfer gap: generating {retry_count} focused candidates…", flush=True)

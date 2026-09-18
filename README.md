@@ -62,6 +62,25 @@ study play
 
 Also included: `examples/discrete-math.md` and `examples/spanish-basics.md`.
 
+### Intellect web app
+
+The same adaptive engine now has a local, keyboard-first web surface:
+
+```bash
+ln -s "$PWD/intellect" ~/.local/bin/intellect
+intellect                 # http://127.0.0.1:4173
+```
+
+Open `http://127.0.0.1:4173`, choose a track and a 10/20/35-minute sprint, then press **Start sprint**. The web app adds:
+
+- track-filtered attack queues for Putnam, Purdue CS/Math, or any source library;
+- a mastery field, weak-topic prioritization, confidence calibration, and transfer gates;
+- recognition that disappears into typed recall once mastery is earned;
+- local PDF/Markdown/text/TeX/CSV intake with grounded question generation;
+- desktop and mobile layouts with keyboard controls (`1`–`4`, `⌘/Ctrl+Enter`, `Enter`, `Esc`).
+
+The web app and terminal UI share `.study/study.db`; progress made in either surface appears in the other.
+
 Import starts question generation in the background. Check it with:
 
 ```bash
@@ -113,9 +132,10 @@ STUDY_RECALL_THRESHOLD=0.55 study play   # default: 0.65
 
 - Python 3.11+
 - An authenticated [`claude`](https://docs.anthropic.com/en/docs/claude-code) CLI for question generation
-- A terminal with ANSI color support
+- `pdftotext` (Poppler) only when importing PDFs
+- A modern browser for the web app or an ANSI terminal for the CLI
 
-No Python packages. No hosted database. Study history stays in `.study/study.db`, which Git ignores.
+No Python or JavaScript packages. No hosted database. Study history stays in `.study/study.db`, which Git ignores.
 
 Typed recall uses conservative local scoring. Clear high-confidence matches and clear low-confidence misses are graded automatically; ambiguous answers still ask you. Recall quality remains the main mastery signal, with small adjustments for pre-reveal confidence calibration and response pace. Perfect high-confidence retrieval also gets a small shard-drop boost. Session exit stays under five lines: mastery growth, regressions, Nyx progress, and next due concept.
 
@@ -128,19 +148,22 @@ Read [CLAUDE.md](CLAUDE.md) for generator rules and [RESEARCH.md](RESEARCH.md) f
 ## Architecture
 
 ```text
-study (shell entrypoint)
-└── study.py
-    ├── Claude Code worker → structured grounded questions
-    ├── SQLite            → material, mastery, reviews, profile
-    ├── scheduler         → due, weak, and interleaved concepts
-    └── terminal UI       → recall wizard + reward loop
+study / intellect (shell entrypoints)
+├── study.py
+│   ├── Claude Code worker → structured grounded questions
+│   ├── SQLite            → material, mastery, reviews, profile
+│   ├── scheduler         → due, weak, and interleaved concepts
+│   └── terminal UI       → recall wizard + reward loop
+├── web.py                → zero-dependency JSON API + local HTTP server
+└── web_static/           → responsive dashboard, study chamber, source intake
 ```
 
 ## Development
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 -m py_compile study.py
+python3 -m py_compile study.py web.py
+node --check web_static/app.js
 ```
 
 ## License
