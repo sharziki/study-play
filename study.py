@@ -376,6 +376,28 @@ def generation_context(db: sqlite3.Connection) -> str:
     return "\n".join(summary) if summary else "No review history yet. Build a broad diagnostic mix."
 
 
+def _claude_error(result: subprocess.CompletedProcess) -> str:
+    """Explain a failed generation in terms the learner can act on.
+
+    The CLI reports real failures on stdout as JSON with a zero-length stderr,
+    so the obvious `result.stderr` message degrades to a bare exit code and
+    hides the actual cause. Expired credentials are by far the most common one,
+    and they need a specific instruction rather than a stack trace.
+    """
+    detail = (result.stderr or "").strip()
+    if not detail and result.stdout:
+        try:
+            payload = json.loads(result.stdout)
+            detail = str(payload.get("result") or payload.get("error") or "").strip()
+        except (json.JSONDecodeError, AttributeError):
+            detail = result.stdout.strip()[:400]
+
+    lowered = detail.lower()
+    if "authenticate" in lowered or "oauth" in lowered or "login" in lowered:
+        return "Claude CLI is signed out. Run `claude login`, then generate again."
+    return detail or f"claude exited {result.returncode}"
+
+
 def claude_questions(
     material: sqlite3.Row,
     history: str,
@@ -415,10 +437,11 @@ MATERIAL:
         cwd=ROOT,
         text=True,
         capture_output=True,
+        stdin=subprocess.DEVNULL,
         timeout=180,
     )
     if result.returncode:
-        raise RuntimeError(result.stderr.strip() or f"claude exited {result.returncode}")
+        raise RuntimeError(_claude_error(result))
     outer = json.loads(result.stdout)
     payload = outer.get("structured_output", outer.get("result", outer)) if isinstance(outer, dict) else outer
     if isinstance(payload, str):
@@ -1402,6 +1425,11 @@ def main() -> None:
             doctor()
     except SeamlessExit:
         pass
+    except RuntimeError as error:
+        # Generation failures are ordinary operating conditions (expired
+        # credentials, a busy model). Report the cause plainly; a traceback
+        # buries the one line that says what to do.
+        raise SystemExit(str(error)) from None
 
 
 if __name__ == "__main__":

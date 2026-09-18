@@ -1,3 +1,5 @@
+import json
+import subprocess
 import tempfile
 import unittest
 from datetime import timedelta
@@ -183,3 +185,25 @@ class StudyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClaudeErrorTest(unittest.TestCase):
+    """Generation failures must name a cause the learner can act on."""
+
+    def _result(self, stdout="", stderr="", returncode=1):
+        return subprocess.CompletedProcess(args=["claude"], returncode=returncode, stdout=stdout, stderr=stderr)
+
+    def test_expired_credentials_produce_an_actionable_instruction(self):
+        payload = json.dumps({"is_error": True, "result": "Failed to authenticate: OAuth session expired"})
+        message = study._claude_error(self._result(stdout=payload))
+        self.assertIn("claude login", message)
+
+    def test_json_stdout_error_is_surfaced_when_stderr_is_empty(self):
+        payload = json.dumps({"is_error": True, "result": "model overloaded"})
+        self.assertEqual(study._claude_error(self._result(stdout=payload)), "model overloaded")
+
+    def test_stderr_still_wins_when_present(self):
+        self.assertEqual(study._claude_error(self._result(stderr="boom")), "boom")
+
+    def test_unparseable_output_falls_back_to_the_exit_code(self):
+        self.assertIn("exited 3", study._claude_error(self._result(returncode=3)))
