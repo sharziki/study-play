@@ -103,6 +103,19 @@ Once an exam passes it stops exerting pressure. Courses with no scheduled exam
 behave exactly as before. The dashboard opens with a countdown per course, in
 the same order the queue studies them.
 
+Purdue students can skip entering dates by hand:
+
+```bash
+./study exams                 # every registered course
+./study exams "MA 26100"      # just one
+```
+
+This reads the Registrar's published schedule through
+[purdue-mcp](https://github.com/sharziki/purdue-mcp) and records both the
+evening exams held mid-semester and the end-of-term finals, so the queue
+reallocates against real deadlines. Point `PURDUE_MCP_DIR` at a local checkout
+if the published package does not yet carry the exam tools.
+
 To attach material imported earlier:
 
 ```bash
