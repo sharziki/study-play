@@ -18,7 +18,7 @@ import termios
 import textwrap
 import time
 import tty
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -181,6 +181,17 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
           shards INTEGER NOT NULL DEFAULT 0, daily_streak INTEGER NOT NULL DEFAULT 0,
           last_study_date TEXT
         );
+        CREATE TABLE IF NOT EXISTS courses (
+          id INTEGER PRIMARY KEY, code TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
+          term TEXT NOT NULL DEFAULT '', color TEXT NOT NULL DEFAULT '',
+          archived INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS exams (
+          id INTEGER PRIMARY KEY, course_id INTEGER NOT NULL REFERENCES courses(id),
+          title TEXT NOT NULL, exam_date TEXT NOT NULL,
+          weight REAL NOT NULL DEFAULT 1.0, scope_json TEXT NOT NULL DEFAULT '[]',
+          created_at TEXT NOT NULL, UNIQUE(course_id, title)
+        );
         INSERT OR IGNORE INTO profile(id) VALUES (1);
         """
     )
@@ -212,7 +223,91 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
         db.execute("ALTER TABLE profile ADD COLUMN daily_streak INTEGER NOT NULL DEFAULT 0")
     if "last_study_date" not in profile_columns:
         db.execute("ALTER TABLE profile ADD COLUMN last_study_date TEXT")
+    if "course_id" not in material_columns:
+        db.execute("ALTER TABLE materials ADD COLUMN course_id INTEGER REFERENCES courses(id)")
+    db.commit()
     return db
+
+
+EXAM_HORIZON_DAYS = 21
+
+# How far the queue may look past the most urgent question to avoid repeating a
+# topic. Small enough that interleaving never outranks exam pressure.
+INTERLEAVE_WINDOW = 4
+
+
+def _today() -> date:
+    return datetime.now().date()
+
+
+def days_until(exam_date: str, today: date | None = None) -> int:
+    """Whole days from today until exam_date (YYYY-MM-DD). Negative once past."""
+    reference = today or _today()
+    return (date.fromisoformat(exam_date) - reference).days
+
+
+def exam_pressure(days_left: int, weight: float = 1.0) -> float:
+    """Urgency multiplier for a course with an exam `days_left` away.
+
+    Pressure rises hyperbolically as the exam approaches, so a quiz two days out
+    dominates a midterm three weeks out instead of dividing attention evenly.
+    Past exams exert no pressure; a distant exam approaches the 1.0 baseline.
+    """
+    if days_left < 0:
+        return 0.0
+    if days_left > EXAM_HORIZON_DAYS:
+        return 1.0
+    return 1.0 + weight * (EXAM_HORIZON_DAYS - days_left) / 3.0
+
+
+def course_pressures(db: sqlite3.Connection, today: date | None = None) -> dict[int, dict]:
+    """Highest-pressure upcoming exam per course, keyed by course id."""
+    reference = today or _today()
+    pressures: dict[int, dict] = {}
+    for row in db.execute(
+        """SELECT e.id, e.course_id, e.title, e.exam_date, e.weight, c.code, c.title AS course_title
+           FROM exams e JOIN courses c ON c.id = e.course_id
+           WHERE c.archived = 0"""
+    ):
+        days_left = days_until(row["exam_date"], reference)
+        if days_left < 0:
+            continue
+        pressure = exam_pressure(days_left, row["weight"])
+        current = pressures.get(row["course_id"])
+        if current is None or pressure > current["pressure"]:
+            pressures[row["course_id"]] = {
+                "exam_id": row["id"],
+                "course_id": row["course_id"],
+                "course_code": row["code"],
+                "course_title": row["course_title"],
+                "exam_title": row["title"],
+                "exam_date": row["exam_date"],
+                "weight": row["weight"],
+                "days_left": days_left,
+                "pressure": pressure,
+            }
+    return pressures
+
+
+def attempt_priority(row: sqlite3.Row, pressures: dict[int, dict]) -> float:
+    """Rank one candidate question for the next attempt.
+
+    Weakness drives the base score: a lapsed, low-mastery question is worth more
+    than one already retrievable. Exam pressure then multiplies that need, so
+    during midterm season the queue naturally reallocates toward whichever course
+    is tested soonest rather than splitting attention evenly across all of them.
+    """
+    keys = row.keys() if hasattr(row, "keys") else []
+    mastery = float(row["mastery"] or 0.0) if "mastery" in keys else 0.0
+    lapses = float(row["lapses"] or 0) if "lapses" in keys else 0.0
+    reviews = float(row["reviews"] or 0) if "reviews" in keys else 0.0
+    course_id = row["course_id"] if "course_id" in keys else None
+
+    need = (1.0 - min(max(mastery, 0.0), 1.0)) + min(lapses, 5.0) * 0.4
+    if reviews == 0:
+        need += 0.25
+    pressure = (pressures.get(course_id) or {}).get("pressure", 1.0)
+    return need * pressure
 
 
 def import_material(path: Path, background: bool = True) -> int:

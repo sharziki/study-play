@@ -290,7 +290,7 @@ class StudyAPI:
             rows = list(
                 db.execute(
                     f"""SELECT q.*, p.interval_days, p.reviews, p.lapses, p.mastery, p.due_at,
-                               m.title AS material_title, m.campaign
+                               m.title AS material_title, m.campaign, m.course_id
                         FROM questions q JOIN progress p ON p.question_id=q.id
                         JOIN materials m ON m.id=q.material_id
                         WHERE q.status='ready' AND p.due_at<=? {campaign_clause}
@@ -309,7 +309,7 @@ class StudyAPI:
                 rows = list(
                     db.execute(
                         f"""SELECT q.*, p.interval_days, p.reviews, p.lapses, p.mastery, p.due_at,
-                                   m.title AS material_title, m.campaign
+                                   m.title AS material_title, m.campaign, m.course_id
                             FROM questions q JOIN progress p ON p.question_id=q.id
                             JOIN materials m ON m.id=q.material_id
                             WHERE q.status='ready' {campaign_clause}
@@ -317,11 +317,19 @@ class StudyAPI:
                         params,
                     )
                 )
+            pressures = study.course_pressures(db)
             random.shuffle(rows)
+            rows.sort(key=lambda row: study.attempt_priority(row, pressures), reverse=True)
             ordered: list[sqlite3.Row] = []
             while rows and len(ordered) < limit:
+                # Interleaving avoids consecutive same-topic questions, but only
+                # among comparably urgent candidates. Searching the whole queue
+                # for a topic change would hand a distant course equal time with
+                # one being examined in two days, silently undoing the
+                # exam-pressure ordering above.
+                window = rows[: study.INTERLEAVE_WINDOW]
                 pick = next(
-                    (index for index, row in enumerate(rows) if not ordered or row["topic"] != ordered[-1]["topic"]),
+                    (index for index, row in enumerate(window) if not ordered or row["topic"] != ordered[-1]["topic"]),
                     0,
                 )
                 ordered.append(rows.pop(pick))
@@ -341,6 +349,8 @@ class StudyAPI:
                         "difficulty": row["difficulty"],
                         "material": row["material_title"],
                         "campaign": row["campaign"],
+                        "course": (pressures.get(row["course_id"]) or {}).get("course_code", ""),
+                        "exam_days_left": (pressures.get(row["course_id"]) or {}).get("days_left"),
                         "mastery": mastery,
                         "mode": "recognition" if recognition else "recall",
                         "choices": choices,
@@ -348,7 +358,116 @@ class StudyAPI:
                         "target_seconds": 25 + row["difficulty"] * 10,
                     }
                 )
-            return {"questions": questions, "free_run": free_run, "campaign": campaign or "All"}
+            return {
+                "questions": questions,
+                "free_run": free_run,
+                "campaign": campaign or "All",
+                "exams": sorted(pressures.values(), key=lambda item: item["days_left"]),
+            }
+
+    def courses(self) -> dict:
+        """Every active course with its next exam, countdown, and readiness."""
+        with study.connect(self.db_path) as db:
+            pressures = study.course_pressures(db)
+            courses = []
+            for row in db.execute(
+                """SELECT c.id, c.code, c.title, c.term,
+                          COUNT(DISTINCT m.id) AS materials,
+                          COUNT(q.id) AS questions,
+                          COALESCE(AVG(p.mastery), 0) AS mastery,
+                          SUM(CASE WHEN p.due_at <= ? THEN 1 ELSE 0 END) AS due
+                   FROM courses c
+                   LEFT JOIN materials m ON m.course_id = c.id
+                   LEFT JOIN questions q ON q.material_id = m.id AND q.status='ready'
+                   LEFT JOIN progress p ON p.question_id = q.id
+                   WHERE c.archived = 0
+                   GROUP BY c.id ORDER BY c.code""",
+                (study.now().isoformat(),),
+            ):
+                pressure = pressures.get(row["id"], {})
+                courses.append(
+                    {
+                        "id": row["id"],
+                        "code": row["code"],
+                        "title": row["title"],
+                        "term": row["term"],
+                        "materials": row["materials"],
+                        "questions": row["questions"],
+                        "mastery": row["mastery"],
+                        "due": row["due"] or 0,
+                        "next_exam": pressure.get("exam_title"),
+                        "exam_date": pressure.get("exam_date"),
+                        "days_left": pressure.get("days_left"),
+                        "pressure": pressure.get("pressure", 1.0),
+                    }
+                )
+            courses.sort(key=lambda item: (item["days_left"] is None, item["days_left"] or 0))
+            return {"courses": courses}
+
+    def create_course(self, payload: dict) -> dict:
+        code = str(payload.get("code", "")).strip()
+        if not code:
+            raise ValueError("course code is required")
+        title = str(payload.get("title", "")).strip() or code
+        term = str(payload.get("term", "")).strip()
+        with study.connect(self.db_path) as db:
+            db.execute(
+                """INSERT INTO courses(code, title, term, created_at) VALUES (?,?,?,?)
+                   ON CONFLICT(code) DO UPDATE SET title=excluded.title, term=excluded.term""",
+                (code, title, term, study.now().isoformat()),
+            )
+            db.commit()
+            row = db.execute("SELECT id, code, title, term FROM courses WHERE code=?", (code,)).fetchone()
+            return {"course": dict(row)}
+
+    def create_exam(self, payload: dict) -> dict:
+        course_code = str(payload.get("course", "")).strip()
+        title = str(payload.get("title", "")).strip()
+        exam_date = str(payload.get("date", "")).strip()
+        if not (course_code and title and exam_date):
+            raise ValueError("course, title, and date are required")
+        try:
+            study.days_until(exam_date)
+        except ValueError:
+            raise ValueError("date must be YYYY-MM-DD") from None
+        weight = float(payload.get("weight", 1.0))
+        with study.connect(self.db_path) as db:
+            course = db.execute("SELECT id FROM courses WHERE code=?", (course_code,)).fetchone()
+            if course is None:
+                raise ValueError(f"unknown course: {course_code}")
+            db.execute(
+                """INSERT INTO exams(course_id, title, exam_date, weight, created_at) VALUES (?,?,?,?,?)
+                   ON CONFLICT(course_id, title)
+                   DO UPDATE SET exam_date=excluded.exam_date, weight=excluded.weight""",
+                (course["id"], title, exam_date, weight, study.now().isoformat()),
+            )
+            db.commit()
+            return {
+                "exam": {
+                    "course": course_code,
+                    "title": title,
+                    "date": exam_date,
+                    "weight": weight,
+                    "days_left": study.days_until(exam_date),
+                }
+            }
+
+    def assign_material(self, payload: dict) -> dict:
+        """Attach an existing material to a course so its questions inherit exam pressure."""
+        material_id = int(payload.get("material_id", 0))
+        course_code = str(payload.get("course", "")).strip()
+        with study.connect(self.db_path) as db:
+            course = db.execute("SELECT id FROM courses WHERE code=?", (course_code,)).fetchone()
+            if course is None:
+                raise ValueError(f"unknown course: {course_code}")
+            updated = db.execute(
+                "UPDATE materials SET course_id=?, campaign=? WHERE id=?",
+                (course["id"], course_code, material_id),
+            ).rowcount
+            if not updated:
+                raise ValueError(f"unknown material: {material_id}")
+            db.commit()
+            return {"material_id": material_id, "course": course_code}
 
     def review_preview(self, payload: dict) -> dict:
         question_id = int(payload.get("question_id", 0))
@@ -477,14 +596,25 @@ class StudyAPI:
             row = db.execute("SELECT id FROM materials WHERE content_hash=?", (digest,)).fetchone()
             if row:
                 return {"material_id": row["id"], "created": False}
+            # A campaign naming a real course links the material to it, so newly
+            # imported material inherits that course's exam pressure immediately.
+            course = db.execute("SELECT id FROM courses WHERE code=?", (campaign,)).fetchone()
             material_id = db.execute(
-                "INSERT INTO materials(title,path,content,content_hash,created_at,campaign) VALUES (?,?,?,?,?,?)",
-                (title, "web://paste", content, digest, study.now().isoformat(), campaign),
+                "INSERT INTO materials(title,path,content,content_hash,created_at,campaign,course_id) VALUES (?,?,?,?,?,?,?)",
+                (
+                    title,
+                    "web://paste",
+                    content,
+                    digest,
+                    study.now().isoformat(),
+                    campaign,
+                    course["id"] if course else None,
+                ),
             ).lastrowid
             db.commit()
             if material_id is None:
                 raise RuntimeError("material insert did not return an id")
-            return {"material_id": material_id, "created": True}
+            return {"material_id": material_id, "created": True, "course": campaign if course else None}
 
     def generate(self, payload: dict) -> dict:
         material_id = int(payload.get("material_id", 0))
@@ -557,6 +687,9 @@ class Handler(BaseHTTPRequestHandler):
                 campaign = query.get("campaign", [None])[0]
                 self._json(self.api.lesson_session(campaign))
                 return
+            if parsed.path == "/api/courses":
+                self._json(self.api.courses())
+                return
             if parsed.path == "/api/generation-status":
                 self._json(self.api.generation_status())
                 return
@@ -578,6 +711,9 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/material-files": lambda: self.api.import_file(payload),
                 "/api/generate": lambda: self.api.generate(payload),
                 "/api/bury": lambda: self.api.bury(int(payload.get("question_id", 0))),
+                "/api/courses": lambda: self.api.create_course(payload),
+                "/api/exams": lambda: self.api.create_exam(payload),
+                "/api/material-course": lambda: self.api.assign_material(payload),
             }
             if parsed.path not in routes:
                 self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
@@ -598,10 +734,20 @@ class Handler(BaseHTTPRequestHandler):
             candidate = STATIC / "index.html"
         body = candidate.read_bytes()
         content_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+        if candidate.name.endswith(".webmanifest"):
+            content_type = "application/manifest+json"
+        elif candidate.name.endswith(".js"):
+            content_type = "text/javascript"
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", f"{content_type}; charset=utf-8" if content_type.startswith("text/") else content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-cache")
+        if candidate.name == "sw.js":
+            # A cached service worker cannot ship its own replacement, which
+            # would strand every installed client on an old build.
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Service-Worker-Allowed", "/")
+        else:
+            self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(body)
 

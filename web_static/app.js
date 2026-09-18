@@ -139,11 +139,53 @@ function buildMasteryField() {
 
 async function loadDashboard() {
   try {
-    state.dashboard = await api("/api/dashboard");
+    const [dashboard, courses] = await Promise.all([
+      api("/api/dashboard"),
+      // A brain-new install has no courses; that must not blank the dashboard.
+      api("/api/courses").catch(() => ({ courses: [] })),
+    ]);
+    state.dashboard = dashboard;
+    state.courses = courses.courses || [];
     renderDashboard();
   } catch (error) {
     toast(error.message);
   }
+}
+
+function examLabel(daysLeft) {
+  if (daysLeft === 0) return "Today";
+  if (daysLeft === 1) return "Tomorrow";
+  return `${daysLeft} days`;
+}
+
+function renderExamStrip() {
+  const strip = $("#exam-strip");
+  if (!strip) return;
+  const upcoming = (state.courses || []).filter(course => course.days_left !== null && course.days_left !== undefined);
+  if (!upcoming.length) {
+    strip.hidden = true;
+    strip.innerHTML = "";
+    return;
+  }
+  strip.hidden = false;
+  strip.innerHTML = upcoming.map(course => {
+    const days = course.days_left;
+    const urgency = days <= 2 ? "is-imminent" : days <= 7 ? "is-urgent" : "";
+    return `
+      <button class="exam-card ${urgency}" data-campaign="${escapeHTML(course.code)}">
+        <span class="exam-course">${escapeHTML(course.code)}</span>
+        <span class="exam-count">${examLabel(days)}</span>
+        <span class="exam-meta">${escapeHTML(course.next_exam || "Exam")} · ${percent(course.mastery)} ready</span>
+      </button>`;
+  }).join("");
+  $$(".exam-card", strip).forEach(button => button.addEventListener("click", () => {
+    const select = $("#campaign-select");
+    if ([...select.options].some(option => option.value === button.dataset.campaign)) {
+      select.value = button.dataset.campaign;
+      state.campaign = button.dataset.campaign;
+    }
+    $("#start-sprint").focus();
+  }));
 }
 
 function renderDashboard() {
@@ -199,6 +241,7 @@ function renderDashboard() {
   materials.innerHTML = data.materials.length ? data.materials.slice(0, 4).map(material => `
     <article class="material-row"><div><strong>${escapeHTML(material.title)}</strong><small>${escapeHTML(material.campaign)} · ${material.questions} questions</small></div><span>#${material.id}</span></article>
   `).join("") : '<div class="empty-state">No source material yet.</div>';
+  renderExamStrip();
   renderLibrary();
 }
 

@@ -1,0 +1,40 @@
+{
+  "name": "Intellect — adaptive study",
+  "short_name": "Intellect",
+  "description": "One study surface for every course: grounded questions, mastery tracking, and an exam-aware queue.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#090a0c",
+  "theme_color": "#090a0c",
+  "categories": ["education", "productivity"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Start sprint",
+      "short_name": "Sprint",
+      "url": "/?action=sprint",
+      "description": "Jump straight into the highest-value queue"
+    }
+  ]
+}
