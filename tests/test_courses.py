@@ -191,3 +191,33 @@ class CourseApiTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExamSyncParsingTest(unittest.TestCase):
+    """The shape purdue-mcp returns must keep parsing into exam rows."""
+
+    PATTERN = __import__("re").compile(
+        r"([A-Z]{2,5})\s+(\d{5})[A-Z]*[^—\n]*—\s*\w{3}\s+(\d{4}-\d{2}-\d{2})[^\n]*?\[(evening|final)\]"
+    )
+
+    SAMPLE = (
+        "Exams in the next 120 days — West Lafayette\n\n"
+        "  CS 18000BLK — Wed 2026-09-30 06:30p-07:30p (in 12d) · HAAS G050, DSAI B031  [evening]\n"
+        "  MA 26100 — Mon 2026-10-05 08:00p-09:00p (in 17d) · Loeb Plyhs, WTHR 200  [evening]\n"
+        "  MA 26100 — Tue 2026-12-15 01:00p-03:00p (in 88d) · WTHR 200  [final]\n"
+    )
+
+    def test_section_suffixes_and_kinds_are_recovered(self):
+        found = self.PATTERN.findall(self.SAMPLE)
+        self.assertEqual(
+            found,
+            [
+                ("CS", "18000", "2026-09-30", "evening"),
+                ("MA", "26100", "2026-10-05", "evening"),
+                ("MA", "26100", "2026-12-15", "final"),
+            ],
+        )
+
+    def test_the_header_line_is_not_mistaken_for_an_exam(self):
+        header = "Exams in the next 120 days — West Lafayette\n"
+        self.assertEqual(self.PATTERN.findall(header), [])

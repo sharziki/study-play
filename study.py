@@ -649,6 +649,103 @@ def uncovered_topics(db: sqlite3.Connection, material: sqlite3.Row) -> list[str]
     return missing
 
 
+def sync_exams(course_filter: list[str] | None = None) -> None:
+    """Import real exam dates from the Registrar schedule via purdue-mcp.
+
+    Typing exam dates by hand is the step most likely to be skipped or entered
+    wrong, and a wrong date silently mis-prioritizes every study session that
+    follows. Reading the published schedule removes that failure.
+    """
+    import shutil as _shutil
+
+    # A local checkout wins over the published package, so exam support can be
+    # used before a release carries it.
+    local = Path(os.environ.get("PURDUE_MCP_DIR", "")) if os.environ.get("PURDUE_MCP_DIR") else None
+    candidates = [local] if local else []
+    candidates += [Path.home() / "purdue-mcp-work", Path.home() / "purdue-mcp"]
+    server = next((c / "dist" / "index.js" for c in candidates if (c / "dist" / "index.js").is_file()), None)
+
+    if server is not None:
+        command = ["node", str(server)]
+    elif _shutil.which("npx"):
+        command = ["npx", "-y", "purdue-mcp"]
+    else:
+        raise SystemExit("Install Node, or set PURDUE_MCP_DIR to a purdue-mcp checkout.")
+
+    with connect() as db:
+        rows = db.execute(
+            "SELECT code FROM courses WHERE archived=0" if _has_courses(db) else "SELECT DISTINCT campaign AS code FROM materials"
+        ).fetchall()
+    wanted = course_filter or [row["code"] for row in rows]
+    codes = [c for c in wanted if re.match(r"^[A-Z]{2,5}\s*\d{5}$", c.upper().strip())]
+    if not codes:
+        raise SystemExit(
+            "No Purdue course codes registered. Add one first, e.g.\n"
+            "  ./study courses add 'MA 26100' --title 'Multivariable Calculus'"
+        )
+
+    print(f"Reading the Registrar schedule for {', '.join(codes)}…", flush=True)
+    payload = {
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": "upcoming_exams", "arguments": {"days": 120, "courses": codes}},
+    }
+    init = {
+        "jsonrpc": "2.0", "id": 0, "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "study", "version": "1"},
+        },
+    }
+    proc = subprocess.run(
+        command,
+        input="\n".join([json.dumps(init), json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}), json.dumps(payload)]) + "\n",
+        text=True, capture_output=True, timeout=180,
+    )
+    body = ""
+    for line in proc.stdout.splitlines():
+        try:
+            message = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if message.get("id") == 1:
+            body = "\n".join(part.get("text", "") for part in message.get("result", {}).get("content", []))
+    if not body:
+        raise SystemExit(f"purdue-mcp returned no exam data. {proc.stderr.strip()[:200]}")
+    if "not found" in body and "Tool" in body:
+        raise SystemExit(
+            "This purdue-mcp build has no exam tools. Point PURDUE_MCP_DIR at a "
+            "checkout that does, or upgrade the package."
+        )
+
+    # "  CS 18000BLK — Wed 2026-09-30 06:30p-07:30p (in 12d) · rooms  [evening]"
+    # The course number may carry a section suffix that runs straight into the
+    # dash, and a section label may follow it.
+    pattern = re.compile(
+        r"([A-Z]{2,5})\s+(\d{5})[A-Z]*[^—\n]*—\s*\w{3}\s+(\d{4}-\d{2}-\d{2})[^\n]*?\[(evening|final)\]"
+    )
+    found = 0
+    with connect() as db:
+        for subject, number, date, kind in pattern.findall(body):
+            code = f"{subject} {number}"
+            course = db.execute("SELECT id FROM courses WHERE code=?", (code,)).fetchone()
+            if course is None:
+                continue
+            title = f"{'Evening exam' if kind == 'evening' else 'Final exam'} {date}"
+            db.execute(
+                """INSERT INTO exams(course_id,title,exam_date,weight,created_at) VALUES (?,?,?,?,?)
+                   ON CONFLICT(course_id,title) DO UPDATE SET exam_date=excluded.exam_date""",
+                (course["id"], title, date, 2.0 if kind == "final" else 1.0, now().isoformat()),
+            )
+            found += 1
+        db.commit()
+    print(f"Synced {found} exam dates." if found else "No matching exams found for your registered courses.")
+
+
+def _has_courses(db: sqlite3.Connection) -> bool:
+    return bool(db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='courses'").fetchone())
+
+
 def generate(material_id: int | None, count: int) -> None:
     with connect() as db:
         if material_id:
@@ -1559,6 +1656,8 @@ def parser() -> argparse.ArgumentParser:
     sub.add_parser("pet", help="show Nyx, streak, and milestones")
     sub.add_parser("status")
     sub.add_parser("doctor", help="check Claude, database, and content health")
+    exams = sub.add_parser("exams", help="sync real exam dates from the Purdue Registrar")
+    exams.add_argument("courses", nargs="*", help='course codes, e.g. "MA 26100" (default: all registered)')
     return p
 
 
@@ -1580,6 +1679,8 @@ def main() -> None:
             status()
         elif command == "doctor":
             doctor()
+        elif command == "exams":
+            sync_exams(args.courses or None)
     except SeamlessExit:
         pass
     except RuntimeError as error:
