@@ -1,0 +1,19 @@
+[Unit]
+Description=Intellect adaptive study app
+Documentation=file:///home/sharziki/Desktop/study/STUDY_OS.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/sharziki/Desktop/study
+# Bound to loopback only. Tailscale Serve terminates TLS and proxies in, so the
+# tailnet is the access boundary rather than an open port on this host.
+ExecStart=/usr/bin/python3 /home/sharziki/Desktop/study/web.py --host 127.0.0.1 --port 4173
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

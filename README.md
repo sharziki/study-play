@@ -81,6 +81,61 @@ Open `http://127.0.0.1:4173`, choose a track and a 10/20/35-minute sprint, then 
 
 The web app and terminal UI share `.study/study.db`; progress made in either surface appears in the other.
 
+### Courses, exams, and the midterm-season queue
+
+Register each class, then give it dated exams. Material imported under a
+matching campaign name is linked to that course automatically.
+
+```bash
+curl -X POST localhost:4173/api/courses \
+  -H 'Content-Type: application/json' \
+  -d '{"code":"MA 26100","title":"Multivariable Calculus","term":"Fall 2026"}'
+
+curl -X POST localhost:4173/api/exams \
+  -H 'Content-Type: application/json' \
+  -d '{"course":"MA 26100","title":"Quiz 15.2","date":"2026-09-22","weight":1}'
+```
+
+A course's urgency rises as its exam approaches and scales how strongly its
+weak questions are ranked. A quiz in two days outranks a heavier midterm three
+weeks out, and reclaims the queue without starving the other course entirely.
+Once an exam passes it stops exerting pressure. Courses with no scheduled exam
+behave exactly as before. The dashboard opens with a countdown per course, in
+the same order the queue studies them.
+
+To attach material imported earlier:
+
+```bash
+curl -X POST localhost:4173/api/material-course \
+  -H 'Content-Type: application/json' \
+  -d '{"material_id":3,"course":"MA 26100"}'
+```
+
+### Install it on your phone
+
+Intellect is a progressive web app: installable, offline-capable, and
+full-screen. Browsers only offer installation over HTTPS, so serve it over a
+private tunnel rather than plain `localhost`.
+
+With [Tailscale](https://tailscale.com/) on both the host and the phone:
+
+```bash
+tailscale serve --bg --https=8443 http://127.0.0.1:4173
+```
+
+Open the printed `https://<machine>.<tailnet>.ts.net:8443/` address on the
+phone, then **Share → Add to Home Screen** (iOS) or **Install app** (Android).
+The app shell is cached, so it launches instantly and still shows your last
+queue when the connection drops. Answers are never cached; they are written
+straight to SQLite, which remains authoritative for mastery and scheduling.
+
+To keep it running across reboots, install the bundled unit:
+
+```bash
+sudo cp packaging/intellect.service /etc/systemd/system/
+sudo systemctl enable --now intellect
+```
+
 Import starts question generation in the background. Check it with:
 
 ```bash
