@@ -187,3 +187,122 @@ class WebAppTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PathTest(unittest.TestCase):
+    """The path is the home screen, so its ordering rules are load-bearing."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.temp.name) / "study.db"
+        self.api = web.StudyAPI(self.db_path)
+        with study.connect(self.db_path) as db:
+            self.material_id = db.execute(
+                "INSERT INTO materials(title,path,content,content_hash,created_at,campaign) VALUES (?,?,?,?,?,?)",
+                ("Chapter 15", "memory", "content", "hash-15", study.now().isoformat(), "MA 26100"),
+            ).lastrowid
+            for index, topic in enumerate(("Limits", "Continuity", "Partials"), 1):
+                qid = db.execute(
+                    """INSERT INTO questions
+                       (material_id,prompt,answer,explanation,topic,kind,difficulty,source_quote,created_at)
+                       VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (self.material_id, f"Q{index}", f"A{index}", "why", topic, "recall", 3,
+                     "quote", study.now().isoformat()),
+                ).lastrowid
+                db.execute("INSERT INTO progress(question_id,due_at) VALUES (?,?)", (qid, study.now().isoformat()))
+            db.commit()
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_exactly_one_node_is_current_and_later_ones_lock(self):
+        units = self.api.path()["units"]
+        states = [node["state"] for unit in units for node in unit["nodes"]]
+        self.assertEqual(states.count("current"), 1)
+        self.assertEqual(states[0], "current")
+        self.assertTrue(all(state in {"open", "locked"} for state in states[1:]))
+
+    def test_a_short_lookahead_stays_tappable_but_the_rest_locks(self):
+        with study.connect(self.db_path) as db:
+            for index in range(4, 9):
+                qid = db.execute(
+                    """INSERT INTO questions
+                       (material_id,prompt,answer,explanation,topic,kind,difficulty,source_quote,created_at)
+                       VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (self.material_id, f"Q{index}", f"A{index}", "why", f"Topic {index}", "recall", 3,
+                     "quote", study.now().isoformat()),
+                ).lastrowid
+                db.execute("INSERT INTO progress(question_id,due_at) VALUES (?,?)", (qid, study.now().isoformat()))
+            db.commit()
+        states = [node["state"] for node in self.api.path()["units"][0]["nodes"]]
+        self.assertEqual(states[0], "current")
+        self.assertEqual(states[1:3], ["open", "open"])
+        self.assertTrue(all(state == "locked" for state in states[3:]))
+
+    def test_a_mastered_topic_completes_and_hands_the_torch_onward(self):
+        with study.connect(self.db_path) as db:
+            db.execute(
+                """UPDATE progress SET mastery=0.95 WHERE question_id=
+                   (SELECT id FROM questions WHERE topic='Limits')"""
+            )
+            db.commit()
+        nodes = self.api.path()["units"][0]["nodes"]
+        self.assertEqual(nodes[0]["state"], "complete")
+        self.assertEqual(nodes[1]["state"], "current")
+        self.assertAlmostEqual(self.api.path()["units"][0]["progress"], 1 / 3)
+
+    def test_filtering_by_class_hides_the_others(self):
+        with study.connect(self.db_path) as db:
+            other = db.execute(
+                "INSERT INTO materials(title,path,content,content_hash,created_at,campaign) VALUES (?,?,?,?,?,?)",
+                ("CS reading", "memory", "content", "hash-cs", study.now().isoformat(), "CS 18000"),
+            ).lastrowid
+            qid = db.execute(
+                """INSERT INTO questions
+                   (material_id,prompt,answer,explanation,topic,kind,difficulty,source_quote,created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (other, "Q", "A", "why", "Recursion", "recall", 3, "quote", study.now().isoformat()),
+            ).lastrowid
+            db.execute("INSERT INTO progress(question_id,due_at) VALUES (?,?)", (qid, study.now().isoformat()))
+            db.commit()
+        self.assertEqual(len(self.api.path()["units"]), 2)
+        filtered = self.api.path(campaign="CS 18000")["units"]
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["campaign"], "CS 18000")
+
+    def test_the_sooner_exam_takes_the_top_of_the_path(self):
+        from datetime import date, timedelta
+
+        with study.connect(self.db_path) as db:
+            far = db.execute(
+                "INSERT INTO courses(code,title,created_at) VALUES (?,?,?)",
+                ("CS 18000", "Problem Solving", study.now().isoformat()),
+            ).lastrowid
+            near = db.execute(
+                "INSERT INTO courses(code,title,created_at) VALUES (?,?,?)",
+                ("MA 26100", "Multivariate", study.now().isoformat()),
+            ).lastrowid
+            db.execute(
+                "INSERT INTO exams(course_id,title,exam_date,created_at) VALUES (?,?,?,?)",
+                (far, "Midterm", (date.today() + timedelta(days=30)).isoformat(), study.now().isoformat()),
+            )
+            db.execute(
+                "INSERT INTO exams(course_id,title,exam_date,created_at) VALUES (?,?,?,?)",
+                (near, "Quiz", (date.today() + timedelta(days=2)).isoformat(), study.now().isoformat()),
+            )
+            db.execute("UPDATE materials SET course_id=? WHERE id=?", (near, self.material_id))
+            cs_material = db.execute(
+                "INSERT INTO materials(title,path,content,content_hash,created_at,campaign,course_id) VALUES (?,?,?,?,?,?,?)",
+                ("CS reading", "memory", "content", "hash-cs2", study.now().isoformat(), "CS 18000", far),
+            ).lastrowid
+            qid = db.execute(
+                """INSERT INTO questions
+                   (material_id,prompt,answer,explanation,topic,kind,difficulty,source_quote,created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (cs_material, "Q", "A", "why", "Recursion", "recall", 3, "quote", study.now().isoformat()),
+            ).lastrowid
+            db.execute("INSERT INTO progress(question_id,due_at) VALUES (?,?)", (qid, study.now().isoformat()))
+            db.commit()
+        units = self.api.path()["units"]
+        self.assertEqual(units[0]["course"], "MA 26100")
+        self.assertEqual(units[0]["days_left"], 2)

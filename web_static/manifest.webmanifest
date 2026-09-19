@@ -1,14 +1,17 @@
 {
-  "name": "Intellect — adaptive study",
+  "name": "Intellect \u2014 study every class",
   "short_name": "Intellect",
-  "description": "One study surface for every course: grounded questions, mastery tracking, and an exam-aware queue.",
+  "description": "Every class, one path. Short sessions that cover all the material and get you exam-ready.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#090a0c",
-  "theme_color": "#090a0c",
-  "categories": ["education", "productivity"],
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "categories": [
+    "education",
+    "productivity"
+  ],
   "icons": [
     {
       "src": "/icons/icon-192.png",
@@ -31,10 +34,16 @@
   ],
   "shortcuts": [
     {
-      "name": "Start sprint",
-      "short_name": "Sprint",
-      "url": "/?action=sprint",
-      "description": "Jump straight into the highest-value queue"
+      "name": "Start today's set",
+      "short_name": "Study",
+      "url": "/#start",
+      "description": "Open straight into the next set, no decisions"
+    },
+    {
+      "name": "Review due items",
+      "short_name": "Review",
+      "url": "/#review-now",
+      "description": "Only what your memory is about to drop"
     }
   ]
 }

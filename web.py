@@ -26,6 +26,9 @@ ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "web_static"
 MAX_BODY = 32 * 1024 * 1024
 RATINGS = {"again", "hard", "good", "easy"}
+# How many nodes past the current one stay tappable. Two keeps the next action
+# obvious without making the path feel like a paywall.
+LOOKAHEAD = 2
 
 
 class StudyAPI:
@@ -367,6 +370,102 @@ class StudyAPI:
 
     def courses(self) -> dict:
         """Every active course with its next exam, countdown, and readiness."""
+        return self._courses()
+
+    def path(self, campaign: str | None = None) -> dict:
+        """The learning path: units of material, each a row of topic nodes.
+
+        Duolingo's map works because the next action is never a decision. One
+        node is current, everything before it is done, everything after is
+        visibly waiting. Mastery decides the boundary, so the path reorders
+        itself as the learner improves instead of being hand-sequenced.
+        """
+        with study.connect(self.db_path) as db:
+            pressures = study.course_pressures(db)
+            params: list[object] = [study.now().isoformat()]
+            clause = ""
+            if campaign and campaign.lower() != "all":
+                clause = " AND m.campaign=?"
+                params.append(campaign)
+            rows = list(db.execute(
+                f"""SELECT m.id AS material_id, m.title AS material_title, m.campaign,
+                           m.course_id, q.topic,
+                           COUNT(q.id) AS questions,
+                           AVG(p.mastery) AS mastery,
+                           SUM(CASE WHEN p.due_at<=? THEN 1 ELSE 0 END) AS due,
+                           SUM(p.reviews) AS reviews,
+                           MIN(q.id) AS first_question,
+                           MAX(CASE WHEN q.kind='transfer' THEN 1 ELSE 0 END) AS has_transfer
+                    FROM materials m
+                    JOIN questions q ON q.material_id=m.id AND q.status='ready'
+                    JOIN progress p ON p.question_id=q.id
+                    WHERE 1=1 {clause}
+                    GROUP BY m.id, q.topic
+                    ORDER BY m.id, MIN(q.id)""",
+                params,
+            ))
+            lessons = {
+                (row["material_id"], row["topic"]): row["id"]
+                for row in db.execute("SELECT id, material_id, topic FROM lessons")
+            }
+
+        units: list[dict] = []
+        by_material: dict[int, dict] = {}
+        for row in rows:
+            unit = by_material.get(row["material_id"])
+            if unit is None:
+                pressure = pressures.get(row["course_id"]) or {}
+                unit = {
+                    "material_id": row["material_id"],
+                    "title": row["material_title"],
+                    "campaign": row["campaign"],
+                    "course": pressure.get("course_code", row["campaign"]),
+                    "days_left": pressure.get("days_left"),
+                    "exam_title": pressure.get("exam_title"),
+                    "nodes": [],
+                }
+                by_material[row["material_id"]] = unit
+                units.append(unit)
+            mastery = float(row["mastery"] or 0)
+            unit["nodes"].append({
+                "topic": row["topic"],
+                "questions": row["questions"],
+                "mastery": mastery,
+                "due": row["due"] or 0,
+                "reviews": row["reviews"] or 0,
+                "lesson_id": lessons.get((row["material_id"], row["topic"])),
+                "kind": "transfer" if row["has_transfer"] else "practice",
+                "state": "complete" if mastery >= study.recall_threshold() else "open",
+            })
+
+        # Urgent courses float to the top; within a unit the first unfinished
+        # node becomes the entry point. Everything is not hard-locked: a short
+        # lookahead stays tappable because a learner who knows what they need
+        # to study next should never be told no. Locking exists to remove
+        # decisions, not to withhold material.
+        units.sort(key=lambda unit: (unit["days_left"] is None, unit["days_left"] or 0, unit["material_id"]))
+        current_set = False
+        for unit in units:
+            ahead = 0
+            for node in unit["nodes"]:
+                if node["state"] == "complete":
+                    continue
+                if ahead == 0:
+                    node["state"] = "current" if not current_set else "next"
+                    current_set = True
+                elif ahead <= LOOKAHEAD:
+                    node["state"] = "open"
+                else:
+                    node["state"] = "locked"
+                ahead += 1
+            total = len(unit["nodes"]) or 1
+            done = sum(1 for node in unit["nodes"] if node["state"] == "complete")
+            unit["progress"] = done / total
+            unit["complete"] = done == total
+        return {"units": units, "campaign": campaign or "All"}
+
+    def _courses(self) -> dict:
+        """Every active course with its next exam, countdown, and readiness."""
         with study.connect(self.db_path) as db:
             pressures = study.course_pressures(db)
             courses = []
@@ -689,6 +788,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/courses":
                 self._json(self.api.courses())
+                return
+            if parsed.path == "/api/path":
+                query = parse_qs(parsed.query)
+                self._json(self.api.path(query.get("campaign", [None])[0]))
                 return
             if parsed.path == "/api/generation-status":
                 self._json(self.api.generation_status())

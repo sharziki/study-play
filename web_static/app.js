@@ -1,788 +1,689 @@
-const $ = (selector, root = document) => root.querySelector(selector);
-const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+/* Intellect — client.
+   State is deliberately small: the server owns scheduling and mastery, the
+   client owns only what the current session needs. Anything else would drift. */
+
+const api = {
+  async get(path) {
+    const response = await fetch(path, { headers: { Accept: "application/json" } });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "request failed");
+    return data;
+  },
+  async post(path, body) {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "request failed");
+    return data;
+  },
+};
+
+const $ = (id) => document.getElementById(id);
+const DAILY_GOAL = 40;          // XP. Small enough to finish on a bus.
+const MAX_HEARTS = 5;
 
 const state = {
+  campaign: localStorage.getItem("intellect.campaign") || "All",
   dashboard: null,
-  questions: [],
-  index: 0,
-  minutes: 20,
-  campaign: "All",
-  selectedChoice: null,
-  startedAt: 0,
-  sessionStartedAt: 0,
-  sessionXP: 0,
-  committed: false,
-  pendingFile: null,
-  timer: null,
-  lesson: null,
-  lessonCheckIndex: 0,
-  lessonCheckResult: null,
+  path: null,
+  session: null,
 };
 
-const sound = {
-  muted: localStorage.getItem("intellect-muted") === "true",
-  volume: Number(localStorage.getItem("intellect-volume") || 35) / 100,
-  context: null,
-};
-
-function playSound(kind) {
-  if (sound.muted || sound.volume <= 0) return;
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContext) return;
-  sound.context ||= new AudioContext();
-  if (sound.context.state === "suspended") sound.context.resume();
-  const patterns = {
-    correct: [[523.25, 0], [659.25, .08]],
-    incorrect: [[220, 0], [196, .11]],
-    unlock: [[392, 0], [523.25, .09], [659.25, .18], [783.99, .29]],
-    complete: [[523.25, 0], [659.25, .09], [783.99, .18], [1046.5, .31]],
-  };
-  const notes = patterns[kind] || patterns.correct;
-  notes.forEach(([frequency, delay], index) => {
-    const oscillator = sound.context.createOscillator();
-    const gain = sound.context.createGain();
-    const start = sound.context.currentTime + delay;
-    oscillator.type = kind === "incorrect" ? "triangle" : "sine";
-    oscillator.frequency.setValueAtTime(frequency, start);
-    gain.gain.setValueAtTime(0, start);
-    gain.gain.linearRampToValueAtTime(sound.volume * .16, start + .012);
-    gain.gain.exponentialRampToValueAtTime(.0001, start + .16 + index * .015);
-    oscillator.connect(gain).connect(sound.context.destination);
-    oscillator.start(start);
-    oscillator.stop(start + .2);
-  });
-}
-
-function showAchievement(title, detail) {
-  const popover = $("#achievement-popover");
-  $("#achievement-title").textContent = title;
-  $("#achievement-detail").textContent = detail;
-  popover.hidden = false;
-  popover.classList.add("is-visible");
-  clearTimeout(popover.timer);
-  popover.timer = setTimeout(() => {
-    popover.classList.remove("is-visible");
-    setTimeout(() => { popover.hidden = true; }, 250);
-  }, 3200);
-}
-
-function escapeHTML(value = "") {
-  return String(value).replace(/[&<>'"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"})[char]);
-}
-
-function renderMath(root = document.body) {
-  if (typeof window.renderMathInElement !== "function") return;
-  window.renderMathInElement(root, {
-    delimiters: [
-      {left: "$$", right: "$$", display: true},
-      {left: "\\[", right: "\\]", display: true},
-      {left: "\\(", right: "\\)", display: false},
-      {left: "$", right: "$", display: false},
-    ],
-    throwOnError: false,
-    strict: false,
-  });
-}
-
-async function api(path, options = {}) {
-  const response = await fetch(path, {
-    headers: {"Content-Type": "application/json", ...(options.headers || {})},
-    ...options,
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
-  return data;
-}
+/* ---------------- helpers ---------------- */
 
 function toast(message) {
-  const node = $("#toast");
-  node.textContent = message;
-  node.classList.add("is-visible");
-  clearTimeout(node.timer);
-  node.timer = setTimeout(() => node.classList.remove("is-visible"), 2800);
+  const el = $("toast");
+  el.textContent = message;
+  el.classList.add("is-visible");
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => el.classList.remove("is-visible"), 2600);
 }
 
-function percent(value) {
-  return `${Math.round((Number(value) || 0) * 100)}%`;
+function typeset(node) {
+  if (window.renderMathInElement) {
+    try {
+      window.renderMathInElement(node, {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "\\(", right: "\\)", display: false },
+          { left: "$", right: "$", display: false },
+        ],
+        throwOnError: false,
+      });
+    } catch (_) { /* math is a nicety, never a blocker */ }
+  }
 }
 
-function setView(name) {
-  $$(".view").forEach(view => view.classList.toggle("is-visible", view.id === `${name}-view`));
-  $$(".nav-item").forEach(button => {
-    const active = button.dataset.view === name;
-    button.classList.toggle("is-active", active);
-    if (active) button.setAttribute("aria-current", "page");
-    else button.removeAttribute("aria-current");
+function setText(id, value) { const el = $(id); if (el) el.textContent = value; }
+
+function showScreen(name) {
+  document.querySelectorAll(".screen").forEach((screen) => {
+    screen.classList.toggle("is-active", screen.id === `screen-${name}`);
   });
-  if (name === "library" && state.dashboard) renderLibrary();
-  window.scrollTo({top: 0, behavior: "smooth"});
+  document.querySelectorAll(".tab").forEach((tab) => {
+    tab.classList.toggle("is-active", tab.dataset.screen === name);
+  });
+  window.scrollTo(0, 0);
 }
 
-function buildMasteryField() {
-  const field = $("#hero-field");
-  field.innerHTML = "";
-  const nodes = [
-    [8,17,100,-8],[18,72,150,-23],[35,33,120,18],[52,82,120,-16],[64,21,145,32],
-    [73,60,90,-38],[86,32,90,20],[92,79,70,-28],[43,57,110,4],[27,91,80,-42],
-  ];
-  nodes.forEach(([x,y,reach,angle], index) => {
-    const node = document.createElement("i");
-    node.className = "field-node";
-    node.style.left = `${x}%`;
-    node.style.top = `${y}%`;
-    node.style.setProperty("--reach", `${reach}px`);
-    node.style.setProperty("--angle", `${angle}deg`);
-    node.style.opacity = String(.25 + (index % 4) * .18);
-    field.append(node);
-  });
+function haptic(pattern) {
+  if (navigator.vibrate) { try { navigator.vibrate(pattern); } catch (_) {} }
 }
+
+/* ---------------- daily goal ---------------- */
+
+function today() { return new Date().toISOString().slice(0, 10); }
+
+function goalXP() {
+  const saved = JSON.parse(localStorage.getItem("intellect.goal") || "{}");
+  return saved.date === today() ? saved.xp || 0 : 0;
+}
+
+function addGoalXP(amount) {
+  const value = goalXP() + amount;
+  localStorage.setItem("intellect.goal", JSON.stringify({ date: today(), xp: value }));
+  renderGoal();
+}
+
+function renderGoal() {
+  const xp = goalXP();
+  const percent = Math.min(100, Math.round((xp / DAILY_GOAL) * 100));
+  const ring = $("today-ring");
+  ring.style.setProperty("--ring", `${percent}%`);
+  setText("today-ring-label", `${xp}/${DAILY_GOAL}`);
+}
+
+/* ---------------- dashboard ---------------- */
 
 async function loadDashboard() {
-  try {
-    const [dashboard, courses] = await Promise.all([
-      api("/api/dashboard"),
-      // A brain-new install has no courses; that must not blank the dashboard.
-      api("/api/courses").catch(() => ({ courses: [] })),
-    ]);
-    state.dashboard = dashboard;
-    state.courses = courses.courses || [];
-    renderDashboard();
-  } catch (error) {
-    toast(error.message);
+  const data = await api.get("/api/dashboard");
+  state.dashboard = data;
+  const profile = data.profile || {};
+
+  setText("stat-streak", "");
+  $("stat-streak").innerHTML = `<i aria-hidden="true">🔥</i><b>${profile.daily_streak || 0}</b>`;
+  $("stat-xp").innerHTML = `<i aria-hidden="true">⚡</i><b>${profile.xp || 0}</b>`;
+  renderHearts();
+
+  setText("review-due", data.due_count);
+  setText("you-streak", profile.daily_streak || 0);
+  setText("you-xp", profile.xp || 0);
+  setText("you-accuracy", data.reviews_count ? `${Math.round((data.strong_recall || 0) * 100)}%` : "—");
+  setText("you-questions", data.questions_count || 0);
+  setText("you-companion", profile.companion || "Nightling");
+  setText("you-rank", `Rank ${profile.rank || "E"}`);
+
+  const goal = goalXP();
+  if (goal >= DAILY_GOAL) {
+    setText("today-kicker", "Goal complete");
+    setText("today-title", "Daily goal done.");
+    setText("today-sub", "Anything more today is pure gain. Your streak is safe.");
+  } else if (data.due_count > 0) {
+    setText("today-kicker", "Today");
+    setText("today-title", `${data.due_count} item${data.due_count === 1 ? "" : "s"} ready`);
+    setText("today-sub", "Picked from what is weakest and closest to an exam. Tap a node to start.");
+  } else {
+    setText("today-kicker", "Today");
+    setText("today-title", "Nothing overdue");
+    setText("today-sub", "Walk the path to cover new ground, or review early to get ahead.");
   }
+  renderGoal();
+  renderWeak(data.topics || []);
+  renderLibrary(data.materials || []);
+  renderCourseOptions(data.tracks || []);
 }
 
-function examLabel(daysLeft) {
-  if (daysLeft === 0) return "Today";
-  if (daysLeft === 1) return "Tomorrow";
-  return `${daysLeft} days`;
+function renderHearts() {
+  const hearts = currentHearts();
+  const el = $("stat-hearts");
+  el.innerHTML = `<i aria-hidden="true">♥</i><b>${hearts}</b>`;
+  el.classList.toggle("is-dim", hearts === 0);
 }
 
-function renderExamStrip() {
-  const strip = $("#exam-strip");
-  if (!strip) return;
-  const upcoming = (state.courses || []).filter(course => course.days_left !== null && course.days_left !== undefined);
-  if (!upcoming.length) {
-    strip.hidden = true;
-    strip.innerHTML = "";
-    return;
-  }
-  strip.hidden = false;
-  strip.innerHTML = upcoming.map(course => {
-    const days = course.days_left;
-    const urgency = days <= 2 ? "is-imminent" : days <= 7 ? "is-urgent" : "";
-    return `
-      <button class="exam-card ${urgency}" data-campaign="${escapeHTML(course.code)}">
-        <span class="exam-course">${escapeHTML(course.code)}</span>
-        <span class="exam-count">${examLabel(days)}</span>
-        <span class="exam-meta">${escapeHTML(course.next_exam || "Exam")} · ${percent(course.mastery)} ready</span>
-      </button>`;
-  }).join("");
-  $$(".exam-card", strip).forEach(button => button.addEventListener("click", () => {
-    const select = $("#campaign-select");
-    if ([...select.options].some(option => option.value === button.dataset.campaign)) {
-      select.value = button.dataset.campaign;
-      state.campaign = button.dataset.campaign;
-    }
-    $("#start-sprint").focus();
-  }));
+function currentHearts() {
+  const saved = JSON.parse(localStorage.getItem("intellect.hearts") || "{}");
+  // Hearts refill daily. They exist to slow down guess-spamming, not to sell
+  // refills, so the penalty never blocks studying for more than a day.
+  if (saved.date !== today()) return MAX_HEARTS;
+  return Math.max(0, Math.min(MAX_HEARTS, saved.hearts ?? MAX_HEARTS));
 }
 
-function renderDashboard() {
-  const data = state.dashboard;
-  if (!data) return;
-  const p = data.profile;
-  $("#due-count").textContent = data.due_count;
-  $("#strong-recall").textContent = percent(data.strong_recall);
-  $("#question-count").textContent = data.questions_count;
-  $("#material-count").textContent = `across ${data.materials_count} source${data.materials_count === 1 ? "" : "s"}`;
-  $("#rank").textContent = p.rank;
-  $("#nyx-stage").textContent = p.companion;
-  $("#nyx-progress").textContent = p.next_evolution_xp ? `${p.next_evolution_xp - p.xp} XP until evolution` : "final evolution";
-  $("#queue-label").textContent = data.due_count ? `${data.due_count} ideas are ready to revisit` : "A fresh set is ready";
-  $(".topbar .eyebrow").textContent = `${new Intl.DateTimeFormat("en-US", {weekday:"long"}).format(new Date())} · today’s study note`;
-
-  const campaignSelect = $("#campaign-select");
-  const previous = campaignSelect.value || state.campaign;
-  campaignSelect.innerHTML = '<option value="All">All tracks</option>' + data.tracks.map(track =>
-    `<option value="${escapeHTML(track.name)}">${escapeHTML(track.name)}</option>`
-  ).join("");
-  campaignSelect.value = [...campaignSelect.options].some(option => option.value === previous) ? previous : "All";
-
-  const trackList = $("#track-list");
-  trackList.innerHTML = data.tracks.length ? data.tracks.map(track => `
-    <button class="track-item" data-campaign="${escapeHTML(track.name)}">
-      <i class="track-dot"></i><span>${escapeHTML(track.name)}</span><small>${track.due} due</small>
-    </button>`).join("") : '<div class="empty-state">Add your first source</div>';
-  $$(".track-item", trackList).forEach(button => button.addEventListener("click", () => {
-    campaignSelect.value = button.dataset.campaign;
-    state.campaign = button.dataset.campaign;
-    setView("dashboard");
-    $("#start-sprint").focus();
-  }));
-
-  const mastery = $("#mastery-field");
-  mastery.innerHTML = data.topics.length ? data.topics.map(topic => `
-    <article class="mastery-node" style="--mastery:${Number(topic.mastery).toFixed(3)}">
-      <span>${escapeHTML(topic.campaign)}</span>
-      <strong>${escapeHTML(topic.name)}</strong>
-      <small>${percent(topic.mastery)}</small>
-    </article>`).join("") : '<div class="empty-state">Import material and generate questions to reveal the mastery field.</div>';
-
-  const trackCards = $("#track-cards");
-  trackCards.innerHTML = data.tracks.length ? data.tracks.map(track => `
-    <article class="track-card">
-      <div><strong>${escapeHTML(track.name)}</strong><small>${track.questions} questions · ${track.due} due</small></div>
-      <div class="track-progress"><i style="width:${percent(track.mastery)}"></i></div>
-      <span>${percent(track.mastery)}</span>
-    </article>`).join("") : '<div class="empty-state">No tracks yet.</div>';
-
-  const materials = $("#recent-materials");
-  materials.innerHTML = data.materials.length ? data.materials.slice(0, 4).map(material => `
-    <article class="material-row"><div><strong>${escapeHTML(material.title)}</strong><small>${escapeHTML(material.campaign)} · ${material.questions} questions</small></div><span>#${material.id}</span></article>
-  `).join("") : '<div class="empty-state">No source material yet.</div>';
-  renderExamStrip();
-  renderLibrary();
+function setHearts(value) {
+  localStorage.setItem("intellect.hearts", JSON.stringify({ date: today(), hearts: value }));
+  renderHearts();
 }
 
-function renderLibrary() {
-  if (!state.dashboard) return;
-  const grid = $("#library-grid");
-  const materials = state.dashboard.materials;
-  grid.innerHTML = materials.length ? materials.map(material => `
-    <article class="library-card">
-      <span>${escapeHTML(material.campaign)}</span>
-      <h3>${escapeHTML(material.title)}</h3>
-      <small>${material.questions} grounded questions · local source #${material.id}</small>
-    </article>`).join("") : '<div class="empty-state">Your library is empty. Add one trustworthy source to begin.</div>';
-}
-
-function selectedConfidence() {
-  return Number($("input[name=confidence]:checked")?.value || 4);
-}
-
-function currentQuestion() {
-  return state.questions[state.index];
-}
-
-async function startSprint() {
-  state.campaign = $("#campaign-select").value;
-  const button = $("#start-sprint");
-  const original = button.innerHTML;
-  button.disabled = true;
-  button.textContent = "Preparing your lesson…";
-  try {
-    const params = new URLSearchParams({campaign: state.campaign});
-    const lesson = await api(`/api/lesson?${params}`);
-    if (lesson.available && lesson.stage !== "complete") {
-      state.lesson = lesson;
-      state.lessonCheckIndex = lesson.current_check || 0;
-      state.sessionXP = lesson.xp_earned || 0;
-      if (lesson.stage === "challenge") await startQuestionSession(lesson);
-      else renderLesson(lesson);
-    } else {
-      state.lesson = null;
-      await startQuestionSession();
-    }
-  } catch (error) {
-    toast(error.message);
-  } finally {
-    button.disabled = false;
-    button.innerHTML = original;
-  }
-}
-
-async function startQuestionSession(lesson = null) {
-  const requested = state.minutes === 10 ? 6 : state.minutes === 35 ? 20 : 12;
-  const params = new URLSearchParams({limit: String(lesson ? 40 : requested), campaign: state.campaign});
-  if (lesson) params.set("topic", lesson.topic);
-  const session = await api(`/api/session?${params}`);
-  if (!session.questions.length) {
-    toast(state.dashboard?.questions_count ? "No questions in that track yet." : "Add a source and generate questions first.");
-    return;
-  }
-  let questions = session.questions;
-  if (lesson) {
-    questions.sort((a, b) =>
-      Number(b.topic === lesson.topic) - Number(a.topic === lesson.topic) ||
-      Number(b.kind === "transfer") - Number(a.kind === "transfer") ||
-      b.difficulty - a.difficulty
-    );
-    if (questions[0]?.topic === lesson.topic) questions[0].boss = true;
-  }
-  state.questions = questions.slice(0, requested);
-  state.index = 0;
-  state.sessionStartedAt = Date.now();
-  startTimer();
-  setView("study");
-  renderQuestion();
-}
-
-function setLessonStage(stage) {
-  $$(".lesson-stages li").forEach(item => {
-    const order = {teach: 0, check: 1, challenge: 2};
-    item.classList.toggle("is-current", item.dataset.stage === stage);
-    item.classList.toggle("is-complete", order[item.dataset.stage] < order[stage]);
+function renderWeak(topics) {
+  const host = $("weak-list");
+  if (!topics.length) { host.innerHTML = `<p class="empty">Import material and your weakest topics will surface here.</p>`; return; }
+  host.innerHTML = "";
+  topics.slice(0, 10).forEach((topic) => {
+    const button = document.createElement("button");
+    button.className = "weak-item";
+    button.innerHTML = `<div class="card-grow"><b></b><small>${topic.campaign} · ${topic.questions} item${topic.questions === 1 ? "" : "s"}</small></div>
+      <div class="mini-bar"><i style="width:${Math.round((topic.mastery || 0) * 100)}%"></i></div>`;
+    button.querySelector("b").textContent = topic.name;
+    button.addEventListener("click", () => startSession({ topic: topic.name, campaign: topic.campaign, label: topic.name }));
+    host.append(button);
   });
 }
 
-function renderLesson(lesson) {
-  setView("lesson");
-  setLessonStage(lesson.stage === "check" ? "check" : "teach");
-  $("#lesson-reading").hidden = false;
-  $("#lesson-checks").hidden = true;
-  $("#lesson-campaign").textContent = lesson.campaign;
-  $("#lesson-topic").textContent = lesson.topic;
-  $("#lesson-title").textContent = lesson.title;
-  $("#lesson-objective").textContent = lesson.objective;
-  $("#lesson-prerequisites").innerHTML = lesson.prerequisites.length
-    ? lesson.prerequisites.map(item => `<li>${escapeHTML(item)}</li>`).join("")
-    : "<li>Nothing is assumed. We will define every piece before using it.</li>";
-  $("#lesson-motivation").textContent = lesson.motivation;
-  $("#lesson-primitives").innerHTML = lesson.primitives.map(item => `
-    <div><strong>${escapeHTML(item.term)}</strong><p>${escapeHTML(item.meaning)}</p></div>`).join("");
-  $("#lesson-derivation").innerHTML = lesson.derivation_steps.map((step, index) => {
-    const part = typeof step === "string" ? {claim: step, reason: ""} : step;
-    return `<li>
-      <span>${String(index + 1).padStart(2,"0")}</span>
-      <div class="step-explanation">
-        ${part.title ? `<strong>${escapeHTML(part.title)}</strong>` : ""}
-        <p>${escapeHTML(part.claim || part.text || "")}</p>
-        ${part.reason ? `<small><b>Why:</b> ${escapeHTML(part.reason)}</small>` : ""}
-      </div>
-    </li>`;
-  }).join("");
-  const example = lesson.worked_example;
-  $("#worked-example").innerHTML = `
-    <p class="example-problem">${escapeHTML(example.problem || "")}</p>
-    <ol>${(example.steps || []).map(step => {
-      const part = typeof step === "string" ? {action: step, reason: ""} : step;
-      return `<li><div class="step-explanation"><p>${escapeHTML(part.action || part.text || "")}</p>${part.reason ? `<small><b>Because:</b> ${escapeHTML(part.reason)}</small>` : ""}</div></li>`;
-    }).join("")}</ol>
-    <p class="example-answer"><span>Therefore</span>${escapeHTML(example.answer || "")}</p>`;
-  $("#lesson-misconception").textContent = lesson.misconception;
-  $("#lesson-source-quote").textContent = lesson.source_quote;
-  $("#lesson-material").textContent = lesson.material;
-  $("#lesson-xp").textContent = `${state.sessionXP} XP`;
-  renderMath($("#lesson-reading"));
-  if (lesson.stage === "check") beginChecks();
-  else window.scrollTo({top: 0});
+function renderLibrary(materials) {
+  const host = $("library-grid");
+  if (!materials.length) { host.innerHTML = `<p class="empty">No material yet. Add a PDF or paste your notes to build a path.</p>`; return; }
+  host.innerHTML = "";
+  materials.forEach((material) => {
+    const card = document.createElement("div");
+    card.className = "library-card";
+    card.innerHTML = `<div class="card-grow"><b></b><small>${material.campaign} · ${material.questions} item${material.questions === 1 ? "" : "s"}</small></div>`;
+    card.querySelector("b").textContent = material.title;
+    host.append(card);
+  });
 }
 
-function beginChecks() {
-  const lesson = state.lesson;
-  if (!lesson) return;
-  setLessonStage("check");
-  $("#lesson-reading").hidden = true;
-  $("#lesson-checks").hidden = false;
-  renderLessonCheck();
-  window.scrollTo({top: 0, behavior: "smooth"});
-}
-
-function renderLessonCheck() {
-  const lesson = state.lesson;
-  const index = state.lessonCheckIndex;
-  const check = lesson?.checks[index];
-  if (!lesson || !check) return startQuestionSession(lesson);
-  state.lessonCheckResult = null;
-  $("#check-count").textContent = `${index + 1} / ${lesson.checks.length}`;
-  $("#check-prompt").textContent = check.prompt;
-  $("#check-feedback").hidden = true;
-  $("#next-check").hidden = true;
-  $("#check-choices").innerHTML = check.choices.map((choice, choiceIndex) => `
-    <button data-index="${choiceIndex}"><kbd>${choiceIndex + 1}</kbd><span>${escapeHTML(choice)}</span></button>`).join("");
-  $$("#check-choices button").forEach(button => button.addEventListener("click", () => submitLessonCheck(Number(button.dataset.index))));
-  renderMath($("#lesson-checks"));
-}
-
-async function submitLessonCheck(selectedChoice) {
-  const lesson = state.lesson;
-  if (!lesson || state.lessonCheckResult) return;
-  $$("#check-choices button").forEach(button => button.disabled = true);
-  try {
-    const result = await api("/api/lesson-check", {
-      method: "POST",
-      body: JSON.stringify({lesson_id: lesson.id, check_index: state.lessonCheckIndex, selected_choice: selectedChoice}),
+function renderCourseOptions(tracks) {
+  const host = $("course-options");
+  host.innerHTML = "";
+  const options = [{ name: "All", label: "All classes", sub: "Exam pressure decides the order" }].concat(
+    tracks.map((track) => ({
+      name: track.name,
+      label: track.name,
+      sub: `${track.questions} items · ${track.due} due`,
+    }))
+  );
+  options.forEach((option) => {
+    const button = document.createElement("button");
+    button.className = `sheet-option${state.campaign === option.name ? " is-active" : ""}`;
+    button.innerHTML = `<span>${option.label}<br><small>${option.sub}</small></span>${state.campaign === option.name ? "<span>✓</span>" : ""}`;
+    button.addEventListener("click", () => {
+      state.campaign = option.name;
+      localStorage.setItem("intellect.campaign", option.name);
+      $("course-sheet").hidden = true;
+      refreshHome();
     });
-    state.lessonCheckResult = result;
-    const buttons = $$("#check-choices button");
-    buttons[result.correct_choice]?.classList.add("is-correct");
-    if (!result.correct) buttons[selectedChoice]?.classList.add("is-wrong");
-    $("#check-feedback").hidden = false;
-    $("#check-result").textContent = result.correct ? "Yes — that is the structural idea." : "Not yet — repair this layer before moving on.";
-    $("#check-explanation").textContent = result.explanation;
-    $("#check-reward").textContent = result.xp_gained ? `+${result.xp_gained} understanding XP` : "No penalty. Read the distinction and try again.";
-    state.sessionXP += result.xp_gained;
-    $("#lesson-xp").textContent = `${state.sessionXP} XP`;
-    $("#next-check").hidden = false;
-    $("#next-check").innerHTML = result.ready_for_challenge
-      ? 'Concept unlocked — enter the challenge <span>→</span>'
-      : result.correct ? 'Next layer <span>→</span>' : 'Try this check again <span>↻</span>';
-    playSound(result.ready_for_challenge ? "unlock" : result.correct ? "correct" : "incorrect");
-    if (result.ready_for_challenge) showAchievement("Challenge unlocked", `${lesson.topic} · scaffold removed`);
-    $("#next-check").focus();
+    host.append(button);
+  });
+
+  const select = $("import-campaign");
+  if (select) {
+    const names = tracks.map((track) => track.name);
+    ["General", "Putnam"].forEach((extra) => { if (!names.includes(extra)) names.push(extra); });
+    select.innerHTML = names.map((name) => `<option>${name}</option>`).join("");
+  }
+
+  const isAll = state.campaign === "All";
+  setText("course-flag", isAll ? "ALL" : state.campaign.split(/\s+/)[0].slice(0, 4).toUpperCase());
+  setText("course-name", isAll ? "All classes" : state.campaign);
+}
+
+/* ---------------- path ---------------- */
+
+async function loadPath() {
+  const query = state.campaign === "All" ? "" : `?campaign=${encodeURIComponent(state.campaign)}`;
+  const data = await api.get(`/api/path${query}`);
+  state.path = data;
+  renderPath(data.units || []);
+  renderExamRail(data.units || []);
+}
+
+function renderExamRail(units) {
+  const rail = $("exam-rail");
+  const seen = new Map();
+  units.forEach((unit) => {
+    if (unit.days_left === null || unit.days_left === undefined) return;
+    if (!seen.has(unit.course)) seen.set(unit.course, unit);
+  });
+  if (!seen.size) { rail.hidden = true; return; }
+  rail.hidden = false;
+  rail.innerHTML = "";
+  [...seen.values()].sort((a, b) => a.days_left - b.days_left).forEach((unit) => {
+    const pill = document.createElement("div");
+    const urgent = unit.days_left <= 2 ? " is-urgent" : unit.days_left <= 7 ? " is-soon" : "";
+    pill.className = `exam-pill${urgent}`;
+    pill.innerHTML = `<b>${unit.course}</b><small>${unit.exam_title || "Exam"} · ${unit.days_left === 0 ? "today" : `${unit.days_left}d`}</small>`;
+    rail.append(pill);
+  });
+}
+
+const NODE_ICONS = { complete: "★", current: "▶", next: "▶", locked: "🔒", open: "▶" };
+
+function renderPath(units) {
+  const host = $("path-units");
+  host.innerHTML = "";
+  if (!units.length) {
+    host.innerHTML = `<p class="empty">No path yet.<br>Add material and Intellect builds the units for you.</p>`;
+    $("path-end").hidden = false;
+    return;
+  }
+  units.forEach((unit) => {
+    const section = document.createElement("section");
+    section.className = "unit";
+    const urgent = unit.days_left !== null && unit.days_left !== undefined && unit.days_left <= 7;
+    const head = document.createElement("div");
+    head.className = `unit-head${urgent ? " is-urgent" : ""}`;
+    head.innerHTML = `<span class="unit-course">${unit.course}${urgent ? ` · exam in ${unit.days_left}d` : ""}</span>
+      <h3></h3>
+      <div class="unit-bar"><i style="width:${Math.round((unit.progress || 0) * 100)}%"></i></div>`;
+    head.querySelector("h3").textContent = unit.title;
+    section.append(head);
+
+    unit.nodes.forEach((node) => {
+      const row = document.createElement("div");
+      row.className = "node-row";
+      const wrap = document.createElement("div");
+      wrap.className = `node is-${node.state}`;
+      const button = document.createElement("button");
+      button.className = "node-btn";
+      button.textContent = NODE_ICONS[node.state] || "▶";
+      button.setAttribute("aria-label", `${node.topic} — ${node.state}`);
+      button.addEventListener("click", () => {
+        if (node.state === "locked") { toast("Finish the node above first"); haptic(12); return; }
+        startSession({ topic: node.topic, campaign: unit.campaign, label: node.topic, lessonId: node.lesson_id });
+      });
+      const label = document.createElement("span");
+      label.className = "node-label";
+      label.textContent = node.topic;
+      wrap.append(button, label);
+      if (node.state === "current") {
+        const tip = document.createElement("span");
+        tip.className = "node-start";
+        tip.textContent = "START";
+        wrap.prepend(tip);
+      }
+      row.append(wrap);
+      section.append(row);
+    });
+    host.append(section);
+  });
+  $("path-end").hidden = false;
+}
+
+/* ---------------- session ---------------- */
+
+async function startSession({ topic = null, campaign = null, label = "", lessonId = null, limit = 8 } = {}) {
+  if (currentHearts() === 0) {
+    toast("Out of hearts — they refill tomorrow. Review mode still works.");
+  }
+  try {
+    const params = new URLSearchParams({ limit: String(limit) });
+    const scope = campaign || state.campaign;
+    if (scope && scope !== "All") params.set("campaign", scope);
+    if (topic) params.set("topic", topic);
+    const data = await api.get(`/api/session?${params}`);
+    if (!data.questions || !data.questions.length) { toast("Nothing to study here yet"); return; }
+
+    let lesson = null;
+    if (lessonId) {
+      try {
+        const candidate = await api.get(`/api/lesson${scope && scope !== "All" ? `?campaign=${encodeURIComponent(scope)}` : ""}`);
+        if (candidate.available && candidate.topic === topic) lesson = candidate;
+      } catch (_) { /* a missing lesson just means straight to practice */ }
+    }
+
+    state.session = {
+      label: label || scope || "Study",
+      questions: data.questions,
+      index: 0,
+      lesson,
+      teachShown: false,
+      xp: 0,
+      correct: 0,
+      answered: 0,
+      startedAt: Date.now(),
+      questionStartedAt: Date.now(),
+      picked: null,
+      preview: null,
+      phase: "idle",
+    };
+    showScreen("session");
+    renderHeartStrip();
+    if (lesson) showTeach(); else showQuestion();
   } catch (error) {
     toast(error.message);
-    $$("#check-choices button").forEach(button => button.disabled = false);
   }
 }
 
-async function advanceLessonCheck() {
-  const result = state.lessonCheckResult;
-  if (!result) return;
-  if (result.ready_for_challenge) {
-    setLessonStage("challenge");
-    return startQuestionSession(state.lesson);
+function renderHeartStrip() {
+  const hearts = currentHearts();
+  setText("session-hearts", "♥".repeat(hearts) + "♡".repeat(MAX_HEARTS - hearts));
+}
+
+function progressPercent() {
+  const session = state.session;
+  const total = session.questions.length + (session.lesson ? 1 : 0);
+  const done = session.index + (session.lesson && session.teachShown ? 1 : 0);
+  return Math.round((done / total) * 100);
+}
+
+function setStage(name) {
+  ["teach", "question", "done"].forEach((stage) => { $(`stage-${stage}`).hidden = stage !== name; });
+  $("session-bar").style.width = `${progressPercent()}%`;
+}
+
+function showTeach() {
+  const lesson = state.session.lesson;
+  state.session.phase = "teach";
+  setText("teach-chip", "New concept");
+  setText("teach-title", lesson.title || lesson.topic);
+  setText("teach-objective", lesson.objective || "");
+
+  const body = $("teach-body");
+  body.innerHTML = "";
+  const block = (title, html) => {
+    if (!html) return;
+    const div = document.createElement("div");
+    div.className = "teach-block";
+    div.innerHTML = `<h4>${title}</h4>${html}`;
+    body.append(div);
+  };
+  block("Why it exists", lesson.motivation ? `<p>${lesson.motivation}</p>` : "");
+  if (lesson.primitives && lesson.primitives.length) {
+    block("The pieces", `<ul>${lesson.primitives.map((item) => `<li>${typeof item === "string" ? item : `<b>${item.name}</b> — ${item.meaning || ""}`}</li>`).join("")}</ul>`);
   }
-  if (result.correct) state.lessonCheckIndex = result.current_check;
-  renderLessonCheck();
+  if (lesson.derivation_steps && lesson.derivation_steps.length) {
+    block("How it is built", `<ol>${lesson.derivation_steps.map((step) => `<li>${typeof step === "string" ? step : `${step.claim || ""} <i>${step.reason || ""}</i>`}</li>`).join("")}</ol>`);
+  }
+  const worked = lesson.worked_example || {};
+  if (worked.problem) {
+    block("Worked once, completely", `<div class="teach-worked"><b>${worked.problem}</b><p>${(worked.steps || []).join("<br>")}</p><p><b>${worked.answer || ""}</b></p></div>`);
+  }
+  if (lesson.misconception) {
+    const note = document.createElement("div");
+    note.className = "teach-note";
+    note.innerHTML = `<b>Common wrong turn.</b> ${lesson.misconception}`;
+    body.append(note);
+  }
+  typeset(body);
+
+  setStage("teach");
+  $("verdict").hidden = true;
+  const action = $("session-action");
+  action.textContent = "Got it";
+  action.disabled = false;
 }
 
-function startTimer() {
-  clearInterval(state.timer);
-  state.timer = setInterval(() => {
-    const seconds = Math.floor((Date.now() - state.sessionStartedAt) / 1000);
-    $("#session-timer").textContent = `${String(Math.floor(seconds / 60)).padStart(2,"0")}:${String(seconds % 60).padStart(2,"0")}`;
-  }, 1000);
-}
+function showQuestion() {
+  const session = state.session;
+  const question = session.questions[session.index];
+  session.phase = "question";
+  session.picked = null;
+  session.preview = null;
+  session.questionStartedAt = Date.now();
 
-function renderQuestion() {
-  const question = currentQuestion();
-  $(".challenge-shell").classList.remove("has-feedback");
-  if (!question) return finishSession();
-  state.selectedChoice = null;
-  state.startedAt = performance.now();
-  state.committed = false;
-  $("#feedback-panel").hidden = true;
-  $("#manual-rating").hidden = true;
-  $("#reward-strip").hidden = true;
-  $("#next-question").hidden = true;
-  $("#submit-answer").disabled = true;
-  $("#submit-answer").hidden = false;
-  $("#bury-question").hidden = false;
-  $$("input[name=confidence]").forEach(input => input.disabled = false);
-  $("#session-count").textContent = `${state.index + 1} / ${state.questions.length}`;
-  $("#session-bar").style.width = `${state.index * 100 / state.questions.length}%`;
-  $("#study-xp").textContent = `${state.sessionXP} XP`;
-  $("#mode-badge").textContent = question.mode === "recognition" ? "Recognition" : "True recall";
-  $("#challenge-track").textContent = question.campaign;
-  $("#challenge-topic").textContent = question.topic;
-  $("#question-heading").textContent = question.prompt;
-  $("#question-material").textContent = `${question.material} · ${question.kind} · difficulty ${question.difficulty}/5 · mastery ${percent(question.mastery)}`;
-  $("#boss-banner").hidden = !question.boss;
-  $("#boss-target").textContent = `Beat ${question.target_seconds}s for bonus`;
-  $("#heat").textContent = `Heat ×${state.dashboard?.profile.combo || 0}`;
+  setText("q-chip", question.mode === "recognition" ? "Pick the right one" : question.kind === "transfer" ? "Transfer challenge" : "Recall it");
+  const prompt = $("q-prompt");
+  prompt.textContent = question.prompt;
+  typeset(prompt);
 
-  const choices = $("#choice-grid");
-  const recall = $("#recall-box");
-  if (question.mode === "recognition") {
-    choices.hidden = false;
+  const choices = $("q-choices");
+  const recall = $("q-recall");
+  choices.innerHTML = "";
+  if (question.mode === "recognition" && question.choices && question.choices.length) {
     recall.hidden = true;
-    choices.innerHTML = question.choices.map((choice, index) => `
-      <button class="choice" data-index="${index}" data-value="${escapeHTML(choice)}"><kbd>${index + 1}</kbd><span>${escapeHTML(choice)}</span></button>
-    `).join("");
-    $$(".choice", choices).forEach(button => button.addEventListener("click", () => selectChoice(Number(button.dataset.index))));
+    choices.hidden = false;
+    question.choices.forEach((choice) => {
+      const button = document.createElement("button");
+      button.className = "choice";
+      button.textContent = choice;
+      button.addEventListener("click", () => {
+        choices.querySelectorAll(".choice").forEach((el) => el.classList.remove("is-picked"));
+        button.classList.add("is-picked");
+        session.picked = choice;
+        $("session-action").disabled = false;
+        haptic(8);
+      });
+      choices.append(button);
+    });
+    typeset(choices);
   } else {
     choices.hidden = true;
-    choices.innerHTML = "";
     recall.hidden = false;
-    $("#answer-input").value = "";
-    $("#answer-input").focus();
+    const input = $("q-answer");
+    input.value = "";
+    input.oninput = () => { $("session-action").disabled = input.value.trim().length < 2; };
   }
-  renderMath($("#study-view"));
+
+  setStage("question");
+  $("verdict").hidden = true;
+  const action = $("session-action");
+  action.textContent = "Check";
+  action.disabled = true;
 }
 
-function selectChoice(index) {
-  const question = currentQuestion();
-  if (!question || state.committed) return;
-  state.selectedChoice = index;
-  $$(".choice").forEach((button, buttonIndex) => button.classList.toggle("is-selected", buttonIndex === index));
-  $("#submit-answer").disabled = false;
-}
+async function checkAnswer() {
+  const session = state.session;
+  const question = session.questions[session.index];
+  const response = question.mode === "recognition" ? (session.picked || "") : $("q-answer").value.trim();
+  const seconds = (Date.now() - session.questionStartedAt) / 1000;
 
-function responseValue() {
-  const question = currentQuestion();
-  return question.mode === "recognition" ? (question.choices[state.selectedChoice] || "") : $("#answer-input").value.trim();
-}
-
-async function submitAnswer() {
-  const question = currentQuestion();
-  const response = responseValue();
-  if (!question || !response || state.committed) return;
-  const payload = {
+  const preview = await api.post("/api/review-preview", {
     question_id: question.id,
     response,
-    confidence: selectedConfidence(),
-    response_seconds: (performance.now() - state.startedAt) / 1000,
-    boss: question.boss,
+    confidence: 4,
     mode: question.mode,
-    lesson_id: state.lesson && question.topic === state.lesson.topic ? state.lesson.id : 0,
-  };
-  const button = $("#submit-answer");
-  button.disabled = true;
-  button.textContent = "Checking…";
-  try {
-    const preview = await api("/api/review-preview", {method: "POST", body: JSON.stringify(payload)});
-    showPreview(preview);
-    if (preview.needs_rating) {
-      $("#manual-rating").hidden = false;
-      $("#manual-rating button").focus();
-    } else {
-      await commitReview(preview.suggested_rating, payload);
-    }
-  } catch (error) {
-    toast(error.message);
-    button.disabled = false;
-  } finally {
-    button.innerHTML = 'Check answer <span>⌘↵</span>';
+  });
+  session.preview = { ...preview, response, seconds };
+  session.phase = "verdict";
+
+  const right = question.mode === "recognition"
+    ? response === preview.answer
+    : preview.suggested_rating === "good" || preview.suggested_rating === "easy";
+
+  if (question.mode === "recognition") {
+    $("q-choices").querySelectorAll(".choice").forEach((el) => {
+      el.disabled = true;
+      if (el.textContent === preview.answer) el.classList.add("is-right");
+      else if (el.textContent === response) el.classList.add("is-wrong");
+    });
+  }
+
+  const verdict = $("verdict");
+  verdict.hidden = false;
+  verdict.className = `verdict ${right ? "is-right" : "is-wrong"}`;
+  setText("verdict-title", right ? "Correct" : "Not quite");
+  setText("verdict-xp", right ? "+10 XP" : "");
+  setText("verdict-answer", right ? "" : preview.answer);
+  setText("verdict-why", preview.explanation || "");
+  setText("verdict-quote", preview.source_quote || "");
+  $("verdict-source").hidden = !preview.source_quote;
+  typeset(verdict);
+
+  const selfRate = $("self-rate");
+  selfRate.hidden = !preview.needs_rating;
+  $("session-action").disabled = preview.needs_rating;
+  $("session-action").textContent = "Continue";
+
+  if (right) {
+    haptic(14);
+  } else {
+    haptic([18, 60, 18]);
+    setHearts(Math.max(0, currentHearts() - 1));
+    renderHeartStrip();
+    // A missed item is re-queued at the end of the set. Getting it right once
+    // after failing is what actually moves it, so the set does not end on a
+    // miss the learner never saw resolved.
+    session.questions.push(question);
   }
 }
 
-function showPreview(preview) {
-  const panel = $("#feedback-panel");
-  $(".challenge-shell").classList.add("has-feedback");
-  panel.hidden = false;
-  $("#feedback-badge").textContent = preview.suggested_rating === "good" ? "Signal matched" : "Correction";
-  $("#feedback-score").textContent = `estimated match ${Math.round(preview.score * 100)}%`;
-  $("#expected-answer").textContent = preview.answer;
-  $("#answer-explanation").textContent = preview.explanation;
-  $("#source-quote").textContent = preview.source_quote;
-  renderMath(panel);
-  $("#submit-answer").hidden = true;
-  $("#bury-question").hidden = true;
-  $$("input[name=confidence]").forEach(input => input.disabled = true);
-  panel.scrollIntoView({behavior: "smooth", block: "start"});
-}
-
-async function commitReview(rating, initialPayload = null) {
-  const question = currentQuestion();
-  if (!question || state.committed) return;
-  const payload = initialPayload || {
+async function commit(rating) {
+  const session = state.session;
+  const question = session.questions[session.index];
+  const preview = session.preview;
+  const result = await api.post("/api/reviews", {
     question_id: question.id,
-    response: responseValue(),
-    confidence: selectedConfidence(),
-    response_seconds: (performance.now() - state.startedAt) / 1000,
-    boss: question.boss,
-    lesson_id: state.lesson && question.topic === state.lesson.topic ? state.lesson.id : 0,
-  };
-  payload.rating = rating;
-  try {
-    const result = await api("/api/reviews", {method: "POST", body: JSON.stringify(payload)});
-    state.committed = true;
-    state.sessionXP += result.xp_gained + (result.lesson_bonus_xp || 0);
-    $("#manual-rating").hidden = true;
-    $("#reward-strip").hidden = false;
-    $("#next-question").hidden = false;
-    const delta = result.mastery - result.old_mastery;
-    const totalXP = result.xp_gained + (result.lesson_bonus_xp || 0);
-    $("#mastery-delta").textContent = `Mastery +${Math.max(0, Math.round(delta * 100))}%`;
-    $("#xp-delta").textContent = `+${totalXP} XP${result.shards_gained ? ` · ◆${result.shards_gained}` : ""}`;
-    $("#calibration").textContent = result.calibration;
-    $("#feedback-badge").textContent = rating === "again" ? "Weak spot found" : rating === "hard" ? "Rep complete" : rating === "easy" ? "Mastery strike" : "Clean hit";
-    $("#study-xp").textContent = `${state.sessionXP} XP`;
-    $("#heat").textContent = `Heat ×${result.profile.combo}`;
-    playSound(result.lesson_completed ? "complete" : rating === "again" ? "incorrect" : "correct");
-    if (result.lesson_completed) {
-      showAchievement("Concept cleared", `${question.topic} · +${result.lesson_bonus_xp} mastery bonus`);
-      state.lesson.stage = "complete";
-    }
-    $("#next-question").focus();
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-function nextQuestion() {
-  if (!state.committed) return;
-  state.index += 1;
-  renderQuestion();
+    rating,
+    confidence: 4,
+    response: preview.response,
+    response_seconds: preview.seconds,
+    boss: !!question.boss,
+  });
+  session.xp += result.xp_gained + (result.lesson_bonus_xp || 0);
+  session.answered += 1;
+  if (rating === "good" || rating === "easy") session.correct += 1;
+  addGoalXP(result.xp_gained);
+  session.index += 1;
+  if (session.index >= session.questions.length) finishSession();
+  else showQuestion();
 }
 
 function finishSession() {
-  clearInterval(state.timer);
-  const completed = state.questions.length;
-  playSound("complete");
-  toast(`Sprint clear — ${completed} challenges, +${state.sessionXP} XP.`);
-  setView("dashboard");
-  loadDashboard();
+  const session = state.session;
+  session.phase = "done";
+  const seconds = Math.round((Date.now() - session.startedAt) / 1000);
+  setText("done-xp", `+${session.xp}`);
+  setText("done-accuracy", session.answered ? `${Math.round((session.correct / session.answered) * 100)}%` : "—");
+  setText("done-time", `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`);
+  setText("done-note", goalXP() >= DAILY_GOAL
+    ? "Daily goal reached. Your streak is safe."
+    : `${DAILY_GOAL - goalXP()} XP to hit today's goal.`);
+  $("session-bar").style.width = "100%";
+  setStage("done");
+  $("verdict").hidden = true;
+  $("session-action").textContent = "Done";
+  $("session-action").disabled = false;
+  haptic([10, 40, 10, 40, 20]);
 }
 
-async function buryQuestion() {
-  const question = currentQuestion();
-  if (!question) return;
+async function sessionAction() {
+  const session = state.session;
+  if (!session) return;
+  const action = $("session-action");
+  action.disabled = true;
   try {
-    await api("/api/bury", {method: "POST", body: JSON.stringify({question_id: question.id})});
-    toast("Question buried. It will not return.");
-    state.questions.splice(state.index, 1);
-    if (state.index >= state.questions.length) state.index = 0;
-    renderQuestion();
+    if (session.phase === "teach") {
+      session.teachShown = true;
+      showQuestion();
+    } else if (session.phase === "question") {
+      await checkAnswer();
+    } else if (session.phase === "verdict") {
+      const rating = session.preview.needs_rating ? "good" : session.preview.suggested_rating;
+      await commit(rating);
+    } else if (session.phase === "done") {
+      await exitSession();
+    }
   } catch (error) {
     toast(error.message);
+    action.disabled = false;
   }
 }
 
-function exitStudy() {
-  clearInterval(state.timer);
-  setView("dashboard");
-  loadDashboard();
+async function exitSession() {
+  state.session = null;
+  showScreen("path");
+  await refreshHome();
 }
 
-function openImport() {
-  const dialog = $("#import-dialog");
-  if (!dialog.open) dialog.showModal();
-  setTimeout(() => $("#import-title-input").focus(), 50);
-}
+/* ---------------- import ---------------- */
 
-async function importMaterial(event) {
+async function submitImport(event) {
   event.preventDefault();
-  const title = $("#import-title-input").value.trim();
-  const content = $("#import-content").value;
-  const campaign = $("#import-campaign").value;
-  if (!content.trim() && !state.pendingFile) return toast("Paste or choose source material first.");
-  const submit = $("#import-form .primary-small");
-  submit.disabled = true;
-  submit.textContent = "Importing…";
+  const title = $("import-title-input").value.trim();
+  const campaign = $("import-campaign").value;
+  const content = $("import-content").value.trim();
+  const file = $("file-input").files[0];
+  const generate = $("generate-now").checked;
+  if (!title) { toast("Give it a title"); return; }
   try {
-    let result;
-    if (state.pendingFile) {
-      result = await api("/api/material-files", {
-        method: "POST",
-        body: JSON.stringify({
-          title,
-          campaign,
-          filename: state.pendingFile.name,
-          data: state.pendingFile.data,
-        }),
+    if (file) {
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+      await api.post("/api/material-files", {
+        title, campaign, filename: file.name,
+        content_base64: btoa(binary), generate,
       });
+    } else if (content) {
+      await api.post("/api/materials", { title, campaign, content, generate });
     } else {
-      result = await api("/api/materials", {method: "POST", body: JSON.stringify({title, content, campaign})});
+      toast("Add a file or paste some text");
+      return;
     }
-    if ($("#generate-now").checked) {
-      try {
-        await api("/api/generate", {method: "POST", body: JSON.stringify({material_id: result.material_id})});
-        toast(result.created ? "Source imported. Grounded generation started." : "Source already exists. Generation restarted.");
-      } catch (error) {
-        toast(`Source imported. ${error.message}`);
-      }
-    } else {
-      toast(result.created ? "Source imported." : "That source is already in the library.");
-    }
-    $("#import-dialog").close();
-    $("#import-form").reset();
-    state.pendingFile = null;
-    await loadDashboard();
+    $("import-dialog").close();
+    $("import-form").reset();
+    toast(generate ? "Added — building your lessons" : "Added");
+    await refreshHome();
   } catch (error) {
     toast(error.message);
-  } finally {
-    submit.disabled = false;
-    submit.textContent = "Import source";
   }
 }
 
-function fileAsBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error || new Error("Could not read file"));
-    reader.onload = () => resolve(String(reader.result).split(",", 2)[1] || "");
-    reader.readAsDataURL(file);
-  });
+/* ---------------- boot ---------------- */
+
+async function refreshHome() {
+  try {
+    await loadDashboard();
+    await loadPath();
+    await loadCourses();
+  } catch (error) {
+    toast(error.message);
+  }
 }
 
-function bindEvents() {
-  $$(".nav-item").forEach(button => button.addEventListener("click", () => setView(button.dataset.view)));
-  $$(".duration-group button").forEach(button => button.addEventListener("click", () => {
-    state.minutes = Number(button.dataset.minutes);
-    $$(".duration-group button").forEach(item => item.classList.toggle("is-selected", item === button));
-  }));
-  $("#campaign-select").addEventListener("change", event => state.campaign = event.target.value);
-  $("#start-sprint").addEventListener("click", startSprint);
-  $("#exit-study").addEventListener("click", exitStudy);
-  $("#exit-lesson").addEventListener("click", exitStudy);
-  $("#begin-checks").addEventListener("click", beginChecks);
-  $("#next-check").addEventListener("click", advanceLessonCheck);
-  $("#submit-answer").addEventListener("click", submitAnswer);
-  $("#next-question").addEventListener("click", nextQuestion);
-  $("#bury-question").addEventListener("click", buryQuestion);
-  $("#answer-input").addEventListener("input", event => $("#submit-answer").disabled = !event.target.value.trim());
-  $$("#manual-rating button").forEach(button => button.addEventListener("click", () => commitReview(button.dataset.rating)));
-  ["#open-import", "#rail-add", "#inline-import", "#library-import"].forEach(selector => $(selector).addEventListener("click", openImport));
-  $("#refresh-dashboard").addEventListener("click", loadDashboard);
-  $("#import-form").addEventListener("submit", importMaterial);
-  const soundToggle = $("#sound-toggle");
-  const volume = $("#volume-control");
-  soundToggle.setAttribute("aria-pressed", String(sound.muted));
-  soundToggle.textContent = sound.muted ? "♩̸" : "♪";
-  volume.value = String(Math.round(sound.volume * 100));
-  soundToggle.addEventListener("click", () => {
-    sound.muted = !sound.muted;
-    localStorage.setItem("intellect-muted", String(sound.muted));
-    soundToggle.setAttribute("aria-pressed", String(sound.muted));
-    soundToggle.setAttribute("aria-label", sound.muted ? "Enable sound effects" : "Mute sound effects");
-    soundToggle.textContent = sound.muted ? "♩̸" : "♪";
-    if (!sound.muted) playSound("correct");
-  });
-  volume.addEventListener("input", event => {
-    sound.volume = Number(event.target.value) / 100;
-    localStorage.setItem("intellect-volume", String(event.target.value));
-  });
-  $("#file-input").addEventListener("change", async event => {
-    const file = event.target.files[0];
-    if (!file) return;
-    if (file.size > 24 * 1024 * 1024) {
-      event.target.value = "";
-      return toast("Files must be 24 MB or smaller.");
-    }
-    state.pendingFile = {name: file.name, data: await fileAsBase64(file)};
-    $("#import-content").value = file.name.toLowerCase().endsWith(".pdf")
-      ? `[PDF selected: ${file.name} — text will be extracted locally]`
-      : await file.text();
-    if (!$("#import-title-input").value) $("#import-title-input").value = file.name.replace(/\.[^.]+$/, "");
-  });
-
-  document.addEventListener("keydown", event => {
-    const dialogOpen = $("#import-dialog").open;
-    const studyVisible = $("#study-view").classList.contains("is-visible");
-    const lessonVisible = $("#lesson-view").classList.contains("is-visible");
-    if (dialogOpen) return;
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-      event.preventDefault();
-      if (studyVisible) submitAnswer();
-      else if (lessonVisible && !$("#lesson-reading").hidden) beginChecks();
-      else startSprint();
+async function loadCourses() {
+  try {
+    const data = await api.get("/api/courses");
+    const host = $("you-courses");
+    if (!data.courses || !data.courses.length) {
+      host.innerHTML = `<p class="empty">No courses yet.</p>`;
       return;
     }
-    if (lessonVisible) {
-      if (!state.lessonCheckResult && !$("#lesson-checks").hidden && /^[1-4]$/.test(event.key)) {
-        event.preventDefault();
-        submitLessonCheck(Number(event.key) - 1);
-      }
-      if (state.lessonCheckResult && event.key === "Enter") {
-        event.preventDefault();
-        advanceLessonCheck();
-      }
-      if (event.key === "Escape") exitStudy();
-      return;
-    }
-    if (!studyVisible && !event.metaKey && !event.ctrlKey && !event.altKey) {
-      if (event.key.toLowerCase() === "t") setView("dashboard");
-      if (event.key.toLowerCase() === "l") setView("library");
-      return;
-    }
-    if (!studyVisible) return;
-    const question = currentQuestion();
-    if (!question) return;
-    if (!state.committed && question.mode === "recognition" && /^[1-4]$/.test(event.key)) {
-      event.preventDefault();
-      selectChoice(Number(event.key) - 1);
-    }
-    if (state.committed && event.key === "Enter") {
-      event.preventDefault();
-      nextQuestion();
-    }
-    if (event.key === "Escape") exitStudy();
-  });
+    host.innerHTML = "";
+    data.courses.forEach((course) => {
+      const card = document.createElement("div");
+      card.className = "course-card";
+      const countdown = course.days_left === null || course.days_left === undefined
+        ? "no exam scheduled"
+        : `${course.next_exam} in ${course.days_left}d`;
+      card.innerHTML = `<div class="card-grow"><b>${course.code}</b><small>${countdown} · ${course.questions} items</small></div>
+        <div class="mini-bar"><i style="width:${Math.round((course.mastery || 0) * 100)}%"></i></div>`;
+      host.append(card);
+    });
+  } catch (_) { /* courses are optional context, never a boot blocker */ }
 }
 
-buildMasteryField();
-bindEvents();
-loadDashboard();
+function routeHash() {
+  const hash = location.hash.replace(/^#\/?/, "");
+  if (!hash) return;
+  if (["path", "review", "library", "you"].includes(hash)) { showScreen(hash); return; }
+  if (hash === "start") { startSession({ limit: 8, label: "Today" }); return; }
+  if (hash === "review-now") { startSession({ limit: 12, label: "Review" }); }
+}
+
+function bind() {
+  // Deep links. A home-screen shortcut that lands straight in a set removes the
+  // "open the app, decide what to do" step that kills a study habit.
+  window.addEventListener("hashchange", routeHash);
+  document.querySelectorAll(".tab").forEach((tab) => {
+    tab.addEventListener("click", () => showScreen(tab.dataset.screen));
+  });
+  $("session-action").addEventListener("click", sessionAction);
+  $("session-quit").addEventListener("click", exitSession);
+  $("start-review").addEventListener("click", () => startSession({ limit: 12, label: "Review" }));
+  $("today-card").addEventListener("click", () => startSession({ limit: 8, label: "Today" }));
+  $("course-switch").addEventListener("click", () => { $("course-sheet").hidden = false; });
+  $("course-sheet").addEventListener("click", (event) => {
+    if (event.target.id === "course-sheet") $("course-sheet").hidden = true;
+  });
+  $("library-import").addEventListener("click", () => $("import-dialog").showModal());
+  $("path-add").addEventListener("click", () => $("import-dialog").showModal());
+  $("import-form").addEventListener("submit", submitImport);
+  document.querySelectorAll("#self-rate [data-rating]").forEach((button) => {
+    button.addEventListener("click", () => commit(button.dataset.rating).catch((error) => toast(error.message)));
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      if ($("screen-session").classList.contains("is-active")) sessionAction();
+    }
+  });
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }
+}
+
+bind();
+refreshHome().then(routeHash);

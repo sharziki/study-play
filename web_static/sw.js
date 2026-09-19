@@ -9,7 +9,7 @@
  *     which owns mastery and scheduling. A stale write would corrupt progress.
  */
 
-const VERSION = "intellect-v1";
+const VERSION = "intellect-v5";
 const SHELL_CACHE = `${VERSION}-shell`;
 const DATA_CACHE = `${VERSION}-data`;
 
