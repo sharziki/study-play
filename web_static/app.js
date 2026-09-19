@@ -1,63 +1,44 @@
-/* Intellect — client.
-   State is deliberately small: the server owns scheduling and mastery, the
-   client owns only what the current session needs. Anything else would drift. */
+/* Intellect — UI wiring.
+ *
+ * This file renders and listens. All grading, scheduling, and progression
+ * live behind api.js / session.js / player.js, which is what keeps one
+ * codebase honest across a phone and a laptop: the layout changes, the loop
+ * does not.
+ */
 
-const api = {
-  async get(path) {
-    const response = await fetch(path, { headers: { Accept: "application/json" } });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "request failed");
-    return data;
-  },
-  async post(path, body) {
-    const response = await fetch(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body || {}),
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "request failed");
-    return data;
-  },
-};
+import { api } from "./api.js";
+import { renderMath, setMath } from "./math.js";
+import {
+  MAX_HEARTS, addGoalXP, dailyGoalTarget, goalXP, hearts,
+  selectedClass, setSelectedClass,
+} from "./player.js";
+import { PHASES, loadSession } from "./session.js";
 
 const $ = (id) => document.getElementById(id);
-const DAILY_GOAL = 40;          // XP. Small enough to finish on a bus.
-const MAX_HEARTS = 5;
 
 const state = {
-  campaign: localStorage.getItem("intellect.campaign") || "All",
+  campaign: selectedClass(),
   dashboard: null,
+  classes: [],
   path: null,
   session: null,
+  nextNode: null,
 };
 
-/* ---------------- helpers ---------------- */
+/* ---------------- primitives ---------------- */
 
 function toast(message) {
   const el = $("toast");
   el.textContent = message;
   el.classList.add("is-visible");
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => el.classList.remove("is-visible"), 2600);
+  toast.timer = setTimeout(() => el.classList.remove("is-visible"), 2800);
 }
 
-function typeset(node) {
-  if (window.renderMathInElement) {
-    try {
-      window.renderMathInElement(node, {
-        delimiters: [
-          { left: "$$", right: "$$", display: true },
-          { left: "\\(", right: "\\)", display: false },
-          { left: "$", right: "$", display: false },
-        ],
-        throwOnError: false,
-      });
-    } catch (_) { /* math is a nicety, never a blocker */ }
-  }
+function setText(id, value) {
+  const el = $(id);
+  if (el) el.textContent = value;
 }
-
-function setText(id, value) { const el = $(id); if (el) el.textContent = value; }
 
 function showScreen(name) {
   document.querySelectorAll(".screen").forEach((screen) => {
@@ -66,35 +47,121 @@ function showScreen(name) {
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.classList.toggle("is-active", tab.dataset.screen === name);
   });
-  window.scrollTo(0, 0);
+  document.body.classList.toggle("in-session", name === "session");
 }
 
 function haptic(pattern) {
-  if (navigator.vibrate) { try { navigator.vibrate(pattern); } catch (_) {} }
+  // Browsers reject vibration until the user has actually touched the page,
+  // and a rejected call logs an error. Feedback is decorative, so only try
+  // once a real interaction has happened.
+  if (!hasInteracted || !navigator.vibrate) return;
+  try { navigator.vibrate(pattern); } catch (_) { /* desktop has none */ }
 }
 
-/* ---------------- daily goal ---------------- */
+let hasInteracted = false;
+["pointerdown", "keydown", "touchstart"].forEach((event) => {
+  window.addEventListener(event, () => { hasInteracted = true; }, { once: true, passive: true });
+});
 
-function today() { return new Date().toISOString().slice(0, 10); }
+/* ---------------- HUD ---------------- */
 
-function goalXP() {
-  const saved = JSON.parse(localStorage.getItem("intellect.goal") || "{}");
-  return saved.date === today() ? saved.xp || 0 : 0;
-}
-
-function addGoalXP(amount) {
-  const value = goalXP() + amount;
-  localStorage.setItem("intellect.goal", JSON.stringify({ date: today(), xp: value }));
-  renderGoal();
+function renderHearts() {
+  const left = hearts();
+  const el = $("stat-hearts");
+  el.innerHTML = `<i aria-hidden="true">♥</i><b>${left}</b>`;
+  el.classList.toggle("is-dim", left === 0);
+  setText("session-hearts", "♥".repeat(left) + "♡".repeat(MAX_HEARTS - left));
 }
 
 function renderGoal() {
+  const target = dailyGoalTarget();
   const xp = goalXP();
-  const percent = Math.min(100, Math.round((xp / DAILY_GOAL) * 100));
-  const ring = $("today-ring");
-  ring.style.setProperty("--ring", `${percent}%`);
-  setText("today-ring-label", `${xp}/${DAILY_GOAL}`);
+  $("today-ring").style.setProperty("--ring", `${Math.min(100, Math.round((xp / target) * 100))}%`);
+  setText("today-ring-label", `${xp}/${target}`);
 }
+
+/* ---------------- class switcher ---------------- */
+
+function classLabel(name) {
+  if (name === "All") return { short: "ALL", label: "All classes" };
+  const found = state.classes.find((item) => item.name === name);
+  return { short: found ? found.short : name.slice(0, 6), label: found ? found.name : name };
+}
+
+function renderClasses() {
+  const options = [
+    {
+      name: "All",
+      short: "ALL",
+      title: "All classes",
+      sub: state.classes.length
+        ? `${state.classes.length} classes · exam pressure decides the order`
+        : "Nothing imported yet",
+      due: state.classes.reduce((sum, item) => sum + item.due, 0),
+      mastery: null,
+    },
+    ...state.classes.map((item) => ({
+      name: item.name,
+      short: item.short,
+      title: item.title,
+      sub: item.days_left === null || item.days_left === undefined
+        ? `${item.questions} items · ${item.topics} topics`
+        : `${item.next_exam} in ${item.days_left}d · ${item.questions} items`,
+      due: item.due,
+      mastery: item.mastery,
+      urgent: item.days_left !== null && item.days_left !== undefined && item.days_left <= 7,
+    })),
+  ];
+
+  // Sidebar (laptop) and sheet (phone) read from the same list, so a class can
+  // never appear in one place and not the other.
+  const rail = $("rail-classes");
+  const sheet = $("course-options");
+  rail.innerHTML = "";
+  sheet.innerHTML = "";
+
+  options.forEach((option) => {
+    const active = state.campaign === option.name;
+
+    const railItem = document.createElement("button");
+    railItem.className = `rail-class${active ? " is-active" : ""}${option.urgent ? " is-urgent" : ""}`;
+    railItem.innerHTML = `<span class="rail-flag">${option.short}</span>
+      <span class="rail-copy"><b></b><small>${option.sub}</small></span>
+      ${option.due ? `<span class="rail-due">${option.due}</span>` : ""}`;
+    railItem.querySelector("b").textContent = option.title;
+    railItem.addEventListener("click", () => pickClass(option.name));
+    rail.append(railItem);
+
+    const sheetItem = document.createElement("button");
+    sheetItem.className = `sheet-option${active ? " is-active" : ""}`;
+    sheetItem.innerHTML = `<span class="sheet-flag">${option.short}</span>
+      <span class="sheet-copy"><b></b><small>${option.sub}</small></span>
+      ${active ? '<span aria-hidden="true">✓</span>' : ""}`;
+    sheetItem.querySelector("b").textContent = option.title;
+    sheetItem.addEventListener("click", () => { closeSheet(); pickClass(option.name); });
+    sheet.append(sheetItem);
+  });
+
+  const current = classLabel(state.campaign);
+  setText("course-flag", current.short);
+  setText("course-name", current.label);
+
+  const select = $("import-campaign");
+  const names = state.classes.map((item) => item.name);
+  ["General"].forEach((extra) => { if (!names.includes(extra)) names.push(extra); });
+  select.innerHTML = names.map((name) => `<option>${name}</option>`).join("");
+}
+
+async function pickClass(name) {
+  state.campaign = name;
+  setSelectedClass(name);
+  renderClasses();
+  await loadPath();
+  renderSideRail();
+}
+
+function openSheet() { $("course-sheet").hidden = false; }
+function closeSheet() { $("course-sheet").hidden = true; }
 
 /* ---------------- dashboard ---------------- */
 
@@ -103,12 +170,13 @@ async function loadDashboard() {
   state.dashboard = data;
   const profile = data.profile || {};
 
-  setText("stat-streak", "");
   $("stat-streak").innerHTML = `<i aria-hidden="true">🔥</i><b>${profile.daily_streak || 0}</b>`;
   $("stat-xp").innerHTML = `<i aria-hidden="true">⚡</i><b>${profile.xp || 0}</b>`;
   renderHearts();
+  renderGoal();
 
   setText("review-due", data.due_count);
+  setText("side-due", data.due_count);
   setText("you-streak", profile.daily_streak || 0);
   setText("you-xp", profile.xp || 0);
   setText("you-accuracy", data.reviews_count ? `${Math.round((data.strong_recall || 0) * 100)}%` : "—");
@@ -117,113 +185,93 @@ async function loadDashboard() {
   setText("you-rank", `Rank ${profile.rank || "E"}`);
 
   const goal = goalXP();
-  if (goal >= DAILY_GOAL) {
+  if (goal >= dailyGoalTarget()) {
     setText("today-kicker", "Goal complete");
     setText("today-title", "Daily goal done.");
     setText("today-sub", "Anything more today is pure gain. Your streak is safe.");
   } else if (data.due_count > 0) {
     setText("today-kicker", "Today");
     setText("today-title", `${data.due_count} item${data.due_count === 1 ? "" : "s"} ready`);
-    setText("today-sub", "Picked from what is weakest and closest to an exam. Tap a node to start.");
+    setText("today-sub", "Picked from what is weakest and closest to an exam.");
   } else {
     setText("today-kicker", "Today");
     setText("today-title", "Nothing overdue");
     setText("today-sub", "Walk the path to cover new ground, or review early to get ahead.");
   }
-  renderGoal();
+
   renderWeak(data.topics || []);
   renderLibrary(data.materials || []);
-  renderCourseOptions(data.tracks || []);
 }
 
-function renderHearts() {
-  const hearts = currentHearts();
-  const el = $("stat-hearts");
-  el.innerHTML = `<i aria-hidden="true">♥</i><b>${hearts}</b>`;
-  el.classList.toggle("is-dim", hearts === 0);
-}
-
-function currentHearts() {
-  const saved = JSON.parse(localStorage.getItem("intellect.hearts") || "{}");
-  // Hearts refill daily. They exist to slow down guess-spamming, not to sell
-  // refills, so the penalty never blocks studying for more than a day.
-  if (saved.date !== today()) return MAX_HEARTS;
-  return Math.max(0, Math.min(MAX_HEARTS, saved.hearts ?? MAX_HEARTS));
-}
-
-function setHearts(value) {
-  localStorage.setItem("intellect.hearts", JSON.stringify({ date: today(), hearts: value }));
-  renderHearts();
+function weakButton(topic) {
+  const button = document.createElement("button");
+  button.className = "weak-item";
+  button.innerHTML = `<span class="card-grow"><b></b><small>${topic.campaign} · ${topic.questions} item${topic.questions === 1 ? "" : "s"}</small></span>
+    <span class="mini-bar"><i style="width:${Math.round((topic.mastery || 0) * 100)}%"></i></span>`;
+  setMath(button.querySelector("b"), topic.name);
+  button.addEventListener("click", () => beginSession({ topic: topic.name, campaign: topic.campaign, label: topic.name }));
+  return button;
 }
 
 function renderWeak(topics) {
   const host = $("weak-list");
-  if (!topics.length) { host.innerHTML = `<p class="empty">Import material and your weakest topics will surface here.</p>`; return; }
   host.innerHTML = "";
-  topics.slice(0, 10).forEach((topic) => {
-    const button = document.createElement("button");
-    button.className = "weak-item";
-    button.innerHTML = `<div class="card-grow"><b></b><small>${topic.campaign} · ${topic.questions} item${topic.questions === 1 ? "" : "s"}</small></div>
-      <div class="mini-bar"><i style="width:${Math.round((topic.mastery || 0) * 100)}%"></i></div>`;
-    button.querySelector("b").textContent = topic.name;
-    button.addEventListener("click", () => startSession({ topic: topic.name, campaign: topic.campaign, label: topic.name }));
-    host.append(button);
-  });
+  if (!topics.length) {
+    host.innerHTML = '<p class="empty">Import material and your weakest topics will surface here.</p>';
+  } else {
+    topics.slice(0, 10).forEach((topic) => host.append(weakButton(topic)));
+  }
+  const side = $("side-weak");
+  side.innerHTML = "";
+  topics.slice(0, 4).forEach((topic) => side.append(weakButton(topic)));
 }
 
 function renderLibrary(materials) {
   const host = $("library-grid");
-  if (!materials.length) { host.innerHTML = `<p class="empty">No material yet. Add a PDF or paste your notes to build a path.</p>`; return; }
   host.innerHTML = "";
+  if (!materials.length) {
+    host.innerHTML = '<p class="empty">No material yet. Add a PDF or paste your notes to build a path.</p>';
+    return;
+  }
   materials.forEach((material) => {
     const card = document.createElement("div");
     card.className = "library-card";
-    card.innerHTML = `<div class="card-grow"><b></b><small>${material.campaign} · ${material.questions} item${material.questions === 1 ? "" : "s"}</small></div>`;
-    card.querySelector("b").textContent = material.title;
+    card.innerHTML = `<span class="card-grow"><b></b><small>${material.campaign} · ${material.questions} item${material.questions === 1 ? "" : "s"}</small></span>`;
+    setMath(card.querySelector("b"), material.title);
     host.append(card);
   });
 }
 
-function renderCourseOptions(tracks) {
-  const host = $("course-options");
-  host.innerHTML = "";
-  const options = [{ name: "All", label: "All classes", sub: "Exam pressure decides the order" }].concat(
-    tracks.map((track) => ({
-      name: track.name,
-      label: track.name,
-      sub: `${track.questions} items · ${track.due} due`,
-    }))
-  );
-  options.forEach((option) => {
-    const button = document.createElement("button");
-    button.className = `sheet-option${state.campaign === option.name ? " is-active" : ""}`;
-    button.innerHTML = `<span>${option.label}<br><small>${option.sub}</small></span>${state.campaign === option.name ? "<span>✓</span>" : ""}`;
-    button.addEventListener("click", () => {
-      state.campaign = option.name;
-      localStorage.setItem("intellect.campaign", option.name);
-      $("course-sheet").hidden = true;
-      refreshHome();
+async function loadCourses() {
+  try {
+    const data = await api.get("/api/courses");
+    const host = $("you-courses");
+    host.innerHTML = "";
+    if (!data.courses || !data.courses.length) {
+      host.innerHTML = '<p class="empty">No courses yet.</p>';
+      return;
+    }
+    data.courses.forEach((course) => {
+      const card = document.createElement("div");
+      card.className = "course-card";
+      const countdown = course.days_left === null || course.days_left === undefined
+        ? "no exam scheduled"
+        : `${course.next_exam} in ${course.days_left}d`;
+      card.innerHTML = `<span class="card-grow"><b>${course.code}</b><small>${countdown} · ${course.questions} items</small></span>
+        <span class="mini-bar"><i style="width:${Math.round((course.mastery || 0) * 100)}%"></i></span>`;
+      host.append(card);
     });
-    host.append(button);
-  });
-
-  const select = $("import-campaign");
-  if (select) {
-    const names = tracks.map((track) => track.name);
-    ["General", "Putnam"].forEach((extra) => { if (!names.includes(extra)) names.push(extra); });
-    select.innerHTML = names.map((name) => `<option>${name}</option>`).join("");
+  } catch (_) {
+    /* Courses are optional context, never a boot blocker. */
   }
-
-  const isAll = state.campaign === "All";
-  setText("course-flag", isAll ? "ALL" : state.campaign.split(/\s+/)[0].slice(0, 4).toUpperCase());
-  setText("course-name", isAll ? "All classes" : state.campaign);
 }
 
 /* ---------------- path ---------------- */
 
+const NODE_ICON = { complete: "★", current: "▶", next: "▶", open: "▶", locked: "🔒" };
+
 async function loadPath() {
-  const query = state.campaign === "All" ? "" : `?campaign=${encodeURIComponent(state.campaign)}`;
-  const data = await api.get(`/api/path${query}`);
+  const data = await api.query("/api/path", { campaign: state.campaign });
   state.path = data;
   renderPath(data.units || []);
   renderExamRail(data.units || []);
@@ -240,24 +288,26 @@ function renderExamRail(units) {
   rail.hidden = false;
   rail.innerHTML = "";
   [...seen.values()].sort((a, b) => a.days_left - b.days_left).forEach((unit) => {
-    const pill = document.createElement("div");
-    const urgent = unit.days_left <= 2 ? " is-urgent" : unit.days_left <= 7 ? " is-soon" : "";
-    pill.className = `exam-pill${urgent}`;
+    const pill = document.createElement("button");
+    const urgency = unit.days_left <= 2 ? " is-urgent" : unit.days_left <= 7 ? " is-soon" : "";
+    pill.className = `exam-pill${urgency}`;
     pill.innerHTML = `<b>${unit.course}</b><small>${unit.exam_title || "Exam"} · ${unit.days_left === 0 ? "today" : `${unit.days_left}d`}</small>`;
+    pill.addEventListener("click", () => pickClass(unit.campaign));
     rail.append(pill);
   });
 }
 
-const NODE_ICONS = { complete: "★", current: "▶", next: "▶", locked: "🔒", open: "▶" };
-
 function renderPath(units) {
   const host = $("path-units");
   host.innerHTML = "";
+  state.nextNode = null;
   if (!units.length) {
-    host.innerHTML = `<p class="empty">No path yet.<br>Add material and Intellect builds the units for you.</p>`;
+    host.innerHTML = '<p class="empty">No path yet.<br>Add material and Intellect builds the units for you.</p>';
     $("path-end").hidden = false;
+    renderSideRail();
     return;
   }
+
   units.forEach((unit) => {
     const section = document.createElement("section");
     section.className = "unit";
@@ -267,25 +317,32 @@ function renderPath(units) {
     head.innerHTML = `<span class="unit-course">${unit.course}${urgent ? ` · exam in ${unit.days_left}d` : ""}</span>
       <h3></h3>
       <div class="unit-bar"><i style="width:${Math.round((unit.progress || 0) * 100)}%"></i></div>`;
-    head.querySelector("h3").textContent = unit.title;
+    setMath(head.querySelector("h3"), unit.title);
     section.append(head);
 
     unit.nodes.forEach((node) => {
+      if (node.state === "current" && !state.nextNode) {
+        state.nextNode = { ...node, campaign: unit.campaign, unit: unit.title };
+      }
       const row = document.createElement("div");
       row.className = "node-row";
       const wrap = document.createElement("div");
       wrap.className = `node is-${node.state}`;
+
       const button = document.createElement("button");
       button.className = "node-btn";
-      button.textContent = NODE_ICONS[node.state] || "▶";
+      button.textContent = NODE_ICON[node.state] || "▶";
       button.setAttribute("aria-label", `${node.topic} — ${node.state}`);
+      button.title = node.topic;
       button.addEventListener("click", () => {
         if (node.state === "locked") { toast("Finish the node above first"); haptic(12); return; }
-        startSession({ topic: node.topic, campaign: unit.campaign, label: node.topic, lessonId: node.lesson_id });
+        beginSession({ topic: node.topic, campaign: unit.campaign, label: node.topic, lessonId: node.lesson_id });
       });
+
       const label = document.createElement("span");
       label.className = "node-label";
-      label.textContent = node.topic;
+      setMath(label, node.topic);
+
       wrap.append(button, label);
       if (node.state === "current") {
         const tip = document.createElement("span");
@@ -299,271 +356,247 @@ function renderPath(units) {
     host.append(section);
   });
   $("path-end").hidden = false;
+  renderSideRail();
+}
+
+function renderSideRail() {
+  const next = state.nextNode;
+  setMath($("side-next"), next ? `${next.topic} — ${next.unit}` : "Nothing queued yet");
 }
 
 /* ---------------- session ---------------- */
 
-async function startSession({ topic = null, campaign = null, label = "", lessonId = null, limit = 8 } = {}) {
-  if (currentHearts() === 0) {
-    toast("Out of hearts — they refill tomorrow. Review mode still works.");
-  }
+async function beginSession(options) {
   try {
-    const params = new URLSearchParams({ limit: String(limit) });
-    const scope = campaign || state.campaign;
-    if (scope && scope !== "All") params.set("campaign", scope);
-    if (topic) params.set("topic", topic);
-    const data = await api.get(`/api/session?${params}`);
-    if (!data.questions || !data.questions.length) { toast("Nothing to study here yet"); return; }
-
-    let lesson = null;
-    if (lessonId) {
-      try {
-        const candidate = await api.get(`/api/lesson${scope && scope !== "All" ? `?campaign=${encodeURIComponent(scope)}` : ""}`);
-        if (candidate.available && candidate.topic === topic) lesson = candidate;
-      } catch (_) { /* a missing lesson just means straight to practice */ }
-    }
-
-    state.session = {
-      label: label || scope || "Study",
-      questions: data.questions,
-      index: 0,
-      lesson,
-      teachShown: false,
-      xp: 0,
-      correct: 0,
-      answered: 0,
-      startedAt: Date.now(),
-      questionStartedAt: Date.now(),
-      picked: null,
-      preview: null,
-      phase: "idle",
-    };
+    if (hearts() === 0) toast("Out of hearts — they refill tomorrow. Review still works.");
+    const session = await loadSession(options);
+    if (!session) { toast("Nothing to study here yet"); return; }
+    state.session = session;
     showScreen("session");
-    renderHeartStrip();
-    if (lesson) showTeach(); else showQuestion();
+    renderHearts();
+    renderStage();
   } catch (error) {
     toast(error.message);
   }
 }
 
-function renderHeartStrip() {
-  const hearts = currentHearts();
-  setText("session-hearts", "♥".repeat(hearts) + "♡".repeat(MAX_HEARTS - hearts));
-}
-
-function progressPercent() {
+function renderStage() {
   const session = state.session;
-  const total = session.questions.length + (session.lesson ? 1 : 0);
-  const done = session.index + (session.lesson && session.teachShown ? 1 : 0);
-  return Math.round((done / total) * 100);
+  if (!session) return;
+  ["teach", "question", "done"].forEach((stage) => {
+    $(`stage-${stage}`).hidden = stage !== (session.phase === PHASES.VERDICT ? "question" : session.phase);
+  });
+  $("session-bar").style.width = `${Math.round(session.progress * 100)}%`;
+
+  if (session.phase === PHASES.TEACH) renderTeach();
+  else if (session.phase === PHASES.QUESTION) renderQuestion();
+  else if (session.phase === PHASES.VERDICT) renderVerdict();
+  else renderDone();
 }
 
-function setStage(name) {
-  ["teach", "question", "done"].forEach((stage) => { $(`stage-${stage}`).hidden = stage !== name; });
-  $("session-bar").style.width = `${progressPercent()}%`;
-}
-
-function showTeach() {
+function renderTeach() {
   const lesson = state.session.lesson;
-  state.session.phase = "teach";
   setText("teach-chip", "New concept");
-  setText("teach-title", lesson.title || lesson.topic);
-  setText("teach-objective", lesson.objective || "");
+  setMath($("teach-title"), lesson.title || lesson.topic);
+  setMath($("teach-objective"), lesson.objective || "");
 
   const body = $("teach-body");
   body.innerHTML = "";
-  const block = (title, html) => {
-    if (!html) return;
+  const block = (title, build) => {
     const div = document.createElement("div");
     div.className = "teach-block";
-    div.innerHTML = `<h4>${title}</h4>${html}`;
+    const heading = document.createElement("h4");
+    heading.textContent = title;
+    div.append(heading);
+    build(div);
     body.append(div);
   };
-  block("Why it exists", lesson.motivation ? `<p>${lesson.motivation}</p>` : "");
+
+  if (lesson.motivation) {
+    block("Why it exists", (div) => {
+      const p = document.createElement("p");
+      setMath(p, lesson.motivation);
+      div.append(p);
+    });
+  }
   if (lesson.primitives && lesson.primitives.length) {
-    block("The pieces", `<ul>${lesson.primitives.map((item) => `<li>${typeof item === "string" ? item : `<b>${item.name}</b> — ${item.meaning || ""}`}</li>`).join("")}</ul>`);
+    block("The pieces", (div) => {
+      const list = document.createElement("ul");
+      lesson.primitives.forEach((item) => {
+        const li = document.createElement("li");
+        setMath(li, typeof item === "string" ? item : `${item.term || item.name}: ${item.meaning || ""}`);
+        list.append(li);
+      });
+      div.append(list);
+    });
   }
   if (lesson.derivation_steps && lesson.derivation_steps.length) {
-    block("How it is built", `<ol>${lesson.derivation_steps.map((step) => `<li>${typeof step === "string" ? step : `${step.claim || ""} <i>${step.reason || ""}</i>`}</li>`).join("")}</ol>`);
+    block("How it is built", (div) => {
+      const list = document.createElement("ol");
+      lesson.derivation_steps.forEach((step) => {
+        const li = document.createElement("li");
+        setMath(li, typeof step === "string" ? step : `${step.claim || ""} — ${step.reason || ""}`);
+        list.append(li);
+      });
+      div.append(list);
+    });
   }
   const worked = lesson.worked_example || {};
   if (worked.problem) {
-    block("Worked once, completely", `<div class="teach-worked"><b>${worked.problem}</b><p>${(worked.steps || []).join("<br>")}</p><p><b>${worked.answer || ""}</b></p></div>`);
+    block("Worked once, completely", (div) => {
+      const box = document.createElement("div");
+      box.className = "teach-worked";
+      const problem = document.createElement("b");
+      setMath(problem, worked.problem);
+      box.append(problem);
+      (worked.steps || []).forEach((step) => {
+        const p = document.createElement("p");
+        setMath(p, step);
+        box.append(p);
+      });
+      if (worked.answer) {
+        const answer = document.createElement("p");
+        answer.className = "worked-answer";
+        setMath(answer, worked.answer);
+        box.append(answer);
+      }
+      div.append(box);
+    });
   }
   if (lesson.misconception) {
     const note = document.createElement("div");
     note.className = "teach-note";
-    note.innerHTML = `<b>Common wrong turn.</b> ${lesson.misconception}`;
+    const strong = document.createElement("b");
+    strong.textContent = "Common wrong turn. ";
+    const span = document.createElement("span");
+    setMath(span, lesson.misconception);
+    note.append(strong, span);
     body.append(note);
   }
-  typeset(body);
 
-  setStage("teach");
   $("verdict").hidden = true;
   const action = $("session-action");
   action.textContent = "Got it";
   action.disabled = false;
 }
 
-function showQuestion() {
+function renderQuestion() {
   const session = state.session;
-  const question = session.questions[session.index];
-  session.phase = "question";
-  session.picked = null;
-  session.preview = null;
-  session.questionStartedAt = Date.now();
-
-  setText("q-chip", question.mode === "recognition" ? "Pick the right one" : question.kind === "transfer" ? "Transfer challenge" : "Recall it");
-  const prompt = $("q-prompt");
-  prompt.textContent = question.prompt;
-  typeset(prompt);
+  const question = session.question;
+  setText("q-chip", question.mode === "recognition"
+    ? "Pick the right one"
+    : question.kind === "transfer" ? "Transfer challenge" : "Recall it");
+  setMath($("q-prompt"), question.prompt);
 
   const choices = $("q-choices");
   const recall = $("q-recall");
   choices.innerHTML = "";
+
   if (question.mode === "recognition" && question.choices && question.choices.length) {
     recall.hidden = true;
     choices.hidden = false;
-    question.choices.forEach((choice) => {
+    question.choices.forEach((choice, index) => {
       const button = document.createElement("button");
       button.className = "choice";
-      button.textContent = choice;
+      button.innerHTML = `<span class="choice-key">${index + 1}</span><span class="choice-text"></span>`;
+      setMath(button.querySelector(".choice-text"), choice);
       button.addEventListener("click", () => {
         choices.querySelectorAll(".choice").forEach((el) => el.classList.remove("is-picked"));
         button.classList.add("is-picked");
-        session.picked = choice;
-        $("session-action").disabled = false;
+        session.setResponse(choice);
+        $("session-action").disabled = !session.canSubmit;
         haptic(8);
       });
       choices.append(button);
     });
-    typeset(choices);
   } else {
     choices.hidden = true;
     recall.hidden = false;
     const input = $("q-answer");
     input.value = "";
-    input.oninput = () => { $("session-action").disabled = input.value.trim().length < 2; };
+    input.oninput = () => {
+      session.setResponse(input.value);
+      $("session-action").disabled = !session.canSubmit;
+    };
+    // Focus is right on a laptop and wrong on a phone, where it throws up the
+    // keyboard before the learner has even read the question.
+    if (window.matchMedia("(min-width: 900px)").matches) input.focus();
   }
 
-  setStage("question");
   $("verdict").hidden = true;
+  $("self-rate").hidden = true;
   const action = $("session-action");
   action.textContent = "Check";
-  action.disabled = true;
+  action.disabled = !session.canSubmit;
 }
 
-async function checkAnswer() {
+function renderVerdict() {
   const session = state.session;
-  const question = session.questions[session.index];
-  const response = question.mode === "recognition" ? (session.picked || "") : $("q-answer").value.trim();
-  const seconds = (Date.now() - session.questionStartedAt) / 1000;
-
-  const preview = await api.post("/api/review-preview", {
-    question_id: question.id,
-    response,
-    confidence: 4,
-    mode: question.mode,
-  });
-  session.preview = { ...preview, response, seconds };
-  session.phase = "verdict";
-
-  const right = question.mode === "recognition"
-    ? response === preview.answer
-    : preview.suggested_rating === "good" || preview.suggested_rating === "easy";
+  const preview = session.preview;
+  const question = session.question;
 
   if (question.mode === "recognition") {
     $("q-choices").querySelectorAll(".choice").forEach((el) => {
       el.disabled = true;
-      if (el.textContent === preview.answer) el.classList.add("is-right");
-      else if (el.textContent === response) el.classList.add("is-wrong");
+      const text = el.querySelector(".choice-text").textContent;
+      if (text === preview.answer) el.classList.add("is-right");
+      else if (text === preview.response) el.classList.add("is-wrong");
     });
   }
 
   const verdict = $("verdict");
   verdict.hidden = false;
-  verdict.className = `verdict ${right ? "is-right" : "is-wrong"}`;
-  setText("verdict-title", right ? "Correct" : "Not quite");
-  setText("verdict-xp", right ? "+10 XP" : "");
-  setText("verdict-answer", right ? "" : preview.answer);
-  setText("verdict-why", preview.explanation || "");
-  setText("verdict-quote", preview.source_quote || "");
+  verdict.className = `verdict ${preview.right ? "is-right" : "is-wrong"}`;
+  setText("verdict-title", preview.right ? "Correct" : "Not quite");
+  setText("verdict-xp", preview.right ? "+10 XP" : "");
+  setMath($("verdict-answer"), preview.right ? "" : preview.answer);
+  setMath($("verdict-why"), preview.explanation || "");
+  setMath($("verdict-quote"), preview.source_quote || "");
   $("verdict-source").hidden = !preview.source_quote;
-  typeset(verdict);
+  $("self-rate").hidden = !session.needsSelfRating;
 
-  const selfRate = $("self-rate");
-  selfRate.hidden = !preview.needs_rating;
-  $("session-action").disabled = preview.needs_rating;
-  $("session-action").textContent = "Continue";
-
-  if (right) {
-    haptic(14);
-  } else {
-    haptic([18, 60, 18]);
-    setHearts(Math.max(0, currentHearts() - 1));
-    renderHeartStrip();
-    // A missed item is re-queued at the end of the set. Getting it right once
-    // after failing is what actually moves it, so the set does not end on a
-    // miss the learner never saw resolved.
-    session.questions.push(question);
-  }
+  const action = $("session-action");
+  action.textContent = "Continue";
+  action.disabled = session.needsSelfRating;
+  haptic(preview.right ? 14 : [18, 60, 18]);
+  renderHearts();
 }
 
-async function commit(rating) {
+function renderDone() {
   const session = state.session;
-  const question = session.questions[session.index];
-  const preview = session.preview;
-  const result = await api.post("/api/reviews", {
-    question_id: question.id,
-    rating,
-    confidence: 4,
-    response: preview.response,
-    response_seconds: preview.seconds,
-    boss: !!question.boss,
-  });
-  session.xp += result.xp_gained + (result.lesson_bonus_xp || 0);
-  session.answered += 1;
-  if (rating === "good" || rating === "easy") session.correct += 1;
-  addGoalXP(result.xp_gained);
-  session.index += 1;
-  if (session.index >= session.questions.length) finishSession();
-  else showQuestion();
-}
-
-function finishSession() {
-  const session = state.session;
-  session.phase = "done";
-  const seconds = Math.round((Date.now() - session.startedAt) / 1000);
+  const seconds = session.elapsedSeconds;
   setText("done-xp", `+${session.xp}`);
-  setText("done-accuracy", session.answered ? `${Math.round((session.correct / session.answered) * 100)}%` : "—");
+  setText("done-accuracy", session.accuracy === null ? "—" : `${Math.round(session.accuracy * 100)}%`);
   setText("done-time", `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`);
-  setText("done-note", goalXP() >= DAILY_GOAL
+  const target = dailyGoalTarget();
+  setText("done-note", goalXP() >= target
     ? "Daily goal reached. Your streak is safe."
-    : `${DAILY_GOAL - goalXP()} XP to hit today's goal.`);
+    : `${target - goalXP()} XP to hit today's goal.`);
   $("session-bar").style.width = "100%";
-  setStage("done");
   $("verdict").hidden = true;
-  $("session-action").textContent = "Done";
-  $("session-action").disabled = false;
+  const action = $("session-action");
+  action.textContent = "Done";
+  action.disabled = false;
   haptic([10, 40, 10, 40, 20]);
 }
 
-async function sessionAction() {
+async function advance() {
   const session = state.session;
   if (!session) return;
   const action = $("session-action");
   action.disabled = true;
   try {
-    if (session.phase === "teach") {
-      session.teachShown = true;
-      showQuestion();
-    } else if (session.phase === "question") {
-      await checkAnswer();
-    } else if (session.phase === "verdict") {
-      const rating = session.preview.needs_rating ? "good" : session.preview.suggested_rating;
-      await commit(rating);
-    } else if (session.phase === "done") {
-      await exitSession();
+    if (session.phase === PHASES.TEACH) {
+      session.acknowledgeLesson();
+      renderStage();
+    } else if (session.phase === PHASES.QUESTION) {
+      await session.check();
+      renderStage();
+    } else if (session.phase === PHASES.VERDICT) {
+      await session.commit(session.suggestedRating);
+      renderStage();
+    } else {
+      await endSession();
     }
   } catch (error) {
     toast(error.message);
@@ -571,10 +604,21 @@ async function sessionAction() {
   }
 }
 
-async function exitSession() {
+async function rateAndAdvance(rating) {
+  const session = state.session;
+  if (!session || session.phase !== PHASES.VERDICT) return;
+  try {
+    await session.commit(rating);
+    renderStage();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function endSession() {
   state.session = null;
   showScreen("path");
-  await refreshHome();
+  await refresh();
 }
 
 /* ---------------- import ---------------- */
@@ -589,13 +633,11 @@ async function submitImport(event) {
   if (!title) { toast("Give it a title"); return; }
   try {
     if (file) {
-      const buffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
+      const bytes = new Uint8Array(await file.arrayBuffer());
       let binary = "";
-      for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+      for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
       await api.post("/api/material-files", {
-        title, campaign, filename: file.name,
-        content_base64: btoa(binary), generate,
+        title, campaign, filename: file.name, content_base64: btoa(binary), generate,
       });
     } else if (content) {
       await api.post("/api/materials", { title, campaign, content, generate });
@@ -606,16 +648,91 @@ async function submitImport(event) {
     $("import-dialog").close();
     $("import-form").reset();
     toast(generate ? "Added — building your lessons" : "Added");
-    await refreshHome();
+    await refresh();
   } catch (error) {
     toast(error.message);
   }
 }
 
+/* ---------------- routing + keys ---------------- */
+
+function routeHash() {
+  const hash = location.hash.replace(/^#\/?/, "");
+  if (!hash) return;
+  if (["path", "review", "library", "you"].includes(hash)) { showScreen(hash); return; }
+  if (hash === "start") { startToday(); return; }
+  if (hash === "review-now") { beginSession({ limit: 12, label: "Review" }); return; }
+  // #topic/<name> opens one topic directly. A shareable link to a concept,
+  // and what the end-to-end checks drive.
+  const topic = hash.match(/^topic\/(.+)$/);
+  if (topic) {
+    const name = decodeURIComponent(topic[1]);
+    beginSession({ topic: name, label: name, limit: 5 });
+  }
+}
+
+function startToday() {
+  const next = state.nextNode;
+  if (next) {
+    beginSession({ topic: next.topic, campaign: next.campaign, label: next.topic, lessonId: next.lesson_id });
+  } else {
+    beginSession({ limit: 8, label: "Today" });
+  }
+}
+
+function onKey(event) {
+  const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName);
+  const inSession = $("screen-session").classList.contains("is-active");
+  const session = state.session;
+
+  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    event.preventDefault();
+    if (inSession) advance();
+    return;
+  }
+  if (typing) return;
+
+  if (inSession && session) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      advance();
+      return;
+    }
+    if (event.key === "Escape") { endSession(); return; }
+    if (session.phase === PHASES.QUESTION && /^[1-9]$/.test(event.key)) {
+      const choice = $("q-choices").querySelectorAll(".choice")[Number(event.key) - 1];
+      if (choice) { choice.click(); event.preventDefault(); }
+      return;
+    }
+    if (session.phase === PHASES.VERDICT && session.needsSelfRating && /^[1-4]$/.test(event.key)) {
+      rateAndAdvance(["again", "hard", "good", "easy"][Number(event.key) - 1]);
+      event.preventDefault();
+    }
+    return;
+  }
+
+  const shortcuts = { s: startToday, r: () => beginSession({ limit: 12, label: "Review" }), a: () => $("import-dialog").showModal() };
+  const key = event.key.toLowerCase();
+  if (shortcuts[key]) { shortcuts[key](); event.preventDefault(); return; }
+  if (/^[1-9]$/.test(event.key)) {
+    const option = $("rail-classes").children[Number(event.key) - 1];
+    if (option) option.click();
+  }
+}
+
 /* ---------------- boot ---------------- */
 
-async function refreshHome() {
+async function refresh() {
   try {
+    const classes = await api.get("/api/classes");
+    state.classes = classes.classes || [];
+    // A class can disappear when its material is removed; do not strand the
+    // learner filtered to something that no longer exists.
+    if (state.campaign !== "All" && !state.classes.some((item) => item.name === state.campaign)) {
+      state.campaign = "All";
+      setSelectedClass("All");
+    }
+    renderClasses();
     await loadDashboard();
     await loadPath();
     await loadCourses();
@@ -624,66 +741,37 @@ async function refreshHome() {
   }
 }
 
-async function loadCourses() {
-  try {
-    const data = await api.get("/api/courses");
-    const host = $("you-courses");
-    if (!data.courses || !data.courses.length) {
-      host.innerHTML = `<p class="empty">No courses yet.</p>`;
-      return;
-    }
-    host.innerHTML = "";
-    data.courses.forEach((course) => {
-      const card = document.createElement("div");
-      card.className = "course-card";
-      const countdown = course.days_left === null || course.days_left === undefined
-        ? "no exam scheduled"
-        : `${course.next_exam} in ${course.days_left}d`;
-      card.innerHTML = `<div class="card-grow"><b>${course.code}</b><small>${countdown} · ${course.questions} items</small></div>
-        <div class="mini-bar"><i style="width:${Math.round((course.mastery || 0) * 100)}%"></i></div>`;
-      host.append(card);
-    });
-  } catch (_) { /* courses are optional context, never a boot blocker */ }
-}
-
-function routeHash() {
-  const hash = location.hash.replace(/^#\/?/, "");
-  if (!hash) return;
-  if (["path", "review", "library", "you"].includes(hash)) { showScreen(hash); return; }
-  if (hash === "start") { startSession({ limit: 8, label: "Today" }); return; }
-  if (hash === "review-now") { startSession({ limit: 12, label: "Review" }); }
-}
-
 function bind() {
-  // Deep links. A home-screen shortcut that lands straight in a set removes the
-  // "open the app, decide what to do" step that kills a study habit.
   window.addEventListener("hashchange", routeHash);
+  document.addEventListener("keydown", onKey);
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.addEventListener("click", () => showScreen(tab.dataset.screen));
   });
-  $("session-action").addEventListener("click", sessionAction);
-  $("session-quit").addEventListener("click", exitSession);
-  $("start-review").addEventListener("click", () => startSession({ limit: 12, label: "Review" }));
-  $("today-card").addEventListener("click", () => startSession({ limit: 8, label: "Today" }));
-  $("course-switch").addEventListener("click", () => { $("course-sheet").hidden = false; });
-  $("course-sheet").addEventListener("click", (event) => {
-    if (event.target.id === "course-sheet") $("course-sheet").hidden = true;
+  $("session-action").addEventListener("click", advance);
+  $("session-quit").addEventListener("click", endSession);
+  $("start-review").addEventListener("click", () => beginSession({ limit: 12, label: "Review" }));
+  $("side-review").addEventListener("click", () => beginSession({ limit: 12, label: "Review" }));
+  $("side-start").addEventListener("click", startToday);
+  $("today-card").addEventListener("click", startToday);
+  $("today-card").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); startToday(); }
   });
-  $("library-import").addEventListener("click", () => $("import-dialog").showModal());
-  $("path-add").addEventListener("click", () => $("import-dialog").showModal());
+  $("course-switch").addEventListener("click", openSheet);
+  $("course-sheet").addEventListener("click", (event) => {
+    if (event.target.id === "course-sheet") closeSheet();
+  });
+  ["library-import", "path-add", "rail-import"].forEach((id) => {
+    $(id).addEventListener("click", () => $("import-dialog").showModal());
+  });
   $("import-form").addEventListener("submit", submitImport);
   document.querySelectorAll("#self-rate [data-rating]").forEach((button) => {
-    button.addEventListener("click", () => commit(button.dataset.rating).catch((error) => toast(error.message)));
+    button.addEventListener("click", () => rateAndAdvance(button.dataset.rating));
   });
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-      if ($("screen-session").classList.contains("is-active")) sessionAction();
-    }
-  });
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("/sw.js").catch(() => {});
-  }
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
 
 bind();
-refreshHome().then(routeHash);
+refresh().then(routeHash);
+
+// Exposed for end-to-end checks that drive the real UI rather than a mock.
+window.intellect = { state, beginSession, advance, refresh, renderMath, pickClass };

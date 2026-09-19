@@ -31,6 +31,18 @@ RATINGS = {"again", "hard", "good", "easy"}
 LOOKAHEAD = 2
 
 
+def _short_label(name: str) -> str:
+    """A compact badge for a class, e.g. "MA 26100" -> "MA 261".
+
+    Course codes are long enough to blow out a phone header, and truncating
+    blindly turns "STAT 350" into "STAT", which is not a class.
+    """
+    parts = str(name).split()
+    if len(parts) >= 2 and parts[1][:1].isdigit():
+        return f"{parts[0]} {parts[1][:3]}"
+    return parts[0][:6] if parts else "All"
+
+
 class StudyAPI:
     def __init__(self, db_path: Path = study.DB_PATH):
         self.db_path = Path(db_path)
@@ -371,6 +383,63 @@ class StudyAPI:
     def courses(self) -> dict:
         """Every active course with its next exam, countdown, and readiness."""
         return self._courses()
+
+    def classes(self) -> dict:
+        """Every subject the learner can switch between, with its own progress.
+
+        This is the macro switcher. It is deliberately derived from the
+        material table rather than a hand-kept list, so importing a new
+        subject makes it appear with no configuration step: fill the database
+        and the app already knows about it.
+        """
+        with study.connect(self.db_path) as db:
+            pressures = study.course_pressures(db)
+            by_course = {
+                pressure["course_code"]: pressure
+                for pressure in pressures.values()
+                if pressure.get("course_code")
+            }
+            subjects = []
+            for row in db.execute(
+                """SELECT m.campaign AS name,
+                          COALESCE(c.title, '') AS title,
+                          COUNT(DISTINCT m.id) AS materials,
+                          COUNT(DISTINCT CASE WHEN q.status='ready' THEN q.id END) AS questions,
+                          COALESCE(AVG(p.mastery), 0) AS mastery,
+                          COUNT(DISTINCT CASE WHEN p.due_at<=? AND q.status='ready' THEN q.id END) AS due,
+                          COUNT(DISTINCT q.topic) AS topics
+                   FROM materials m
+                   LEFT JOIN courses c ON c.id = m.course_id
+                   LEFT JOIN questions q ON q.material_id = m.id
+                   LEFT JOIN progress p ON p.question_id = q.id
+                   GROUP BY m.campaign
+                   HAVING questions > 0
+                   ORDER BY m.campaign""",
+                (study.now().isoformat(),),
+            ):
+                pressure = by_course.get(row["name"], {})
+                subjects.append(
+                    {
+                        "name": row["name"],
+                        "title": row["title"] or row["name"],
+                        "short": _short_label(row["name"]),
+                        "materials": row["materials"],
+                        "questions": row["questions"],
+                        "topics": row["topics"],
+                        "mastery": float(row["mastery"] or 0),
+                        "due": row["due"],
+                        "next_exam": pressure.get("exam_title"),
+                        "exam_date": pressure.get("exam_date"),
+                        "days_left": pressure.get("days_left"),
+                    }
+                )
+            subjects.sort(key=lambda item: (item["days_left"] is None, item["days_left"] or 0, item["name"]))
+            totals = {
+                "questions": sum(item["questions"] for item in subjects),
+                "due": sum(item["due"] for item in subjects),
+                "materials": sum(item["materials"] for item in subjects),
+            }
+            return {"classes": subjects, "totals": totals}
 
     def path(self, campaign: str | None = None) -> dict:
         """The learning path: units of material, each a row of topic nodes.
@@ -788,6 +857,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/courses":
                 self._json(self.api.courses())
+                return
+            if parsed.path == "/api/classes":
+                self._json(self.api.classes())
                 return
             if parsed.path == "/api/path":
                 query = parse_qs(parsed.query)

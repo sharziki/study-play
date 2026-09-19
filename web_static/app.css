@@ -365,14 +365,135 @@ dialog input[type=text], dialog input:not([type]), dialog select, dialog textare
 
 .empty { text-align: center; color: var(--ink-soft); font-size: 14px; padding: 30px 10px; line-height: 1.6; }
 
-/* ---------- tablet / desktop ---------- */
-@media (min-width: 760px) {
-  .scroll { padding: 24px max(24px, calc(50% - 300px)) 40px; }
-  .session-body, .session-foot, .session-top { padding-left: max(24px, calc(50% - 300px)); padding-right: max(24px, calc(50% - 300px)); }
-  .today-card h1 { font-size: 26px; }
+
+/* ---------- structure: one app, two shapes ----------
+   Phone: a single column with a bottom tab bar.
+   Laptop: a persistent class rail on the left plus a context column on the
+   right. Same DOM, same session loop; only the frame changes. A stretched
+   phone layout on a 15-inch screen is what this avoids. */
+
+.app { display: flex; min-height: 100dvh; }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+
+.rail { display: none; }
+.wide-side { display: none; }
+.wide-grid { display: block; }
+
+.screen { display: none; position: absolute; inset: 0; flex-direction: column; background: var(--wash); }
+.screen.is-active { display: flex; }
+.session { position: fixed; z-index: 30; }
+body.in-session .tabbar { display: none; }
+
+/* ---------- laptop ---------- */
+@media (min-width: 900px) {
+  .rail {
+    display: flex; flex-direction: column; gap: 4px;
+    width: 268px; flex: none; padding: 20px 14px;
+    background: var(--paper); border-right: 2px solid var(--line);
+    height: 100dvh; position: sticky; top: 0; overflow-y: auto;
+  }
+  .rail-brand { display: flex; align-items: center; gap: 10px; font-size: 17px; padding: 0 8px 16px; }
+  .rail-logo { color: var(--green); font-size: 20px; }
+  .rail-classes { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+  .rail-class {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    min-height: 58px; padding: 10px 12px; border-radius: var(--r-md);
+    text-align: left; border: 2px solid transparent;
+  }
+  .rail-class:hover { background: var(--wash); }
+  .rail-class.is-active { background: var(--green-wash); border-color: var(--green); }
+  .rail-class.is-urgent .rail-flag { background: var(--amber-wash); color: #8a5200; }
+  .rail-flag {
+    flex: none; font-size: 10px; font-weight: 800; letter-spacing: .04em;
+    background: var(--blue-wash); color: #0b5fbf; padding: 7px 8px; border-radius: 8px;
+    min-width: 54px; text-align: center;
+  }
+  .rail-copy { flex: 1; min-width: 0; }
+  .rail-copy b { display: block; font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rail-copy small { display: block; font-size: 11px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rail-due {
+    flex: none; font-size: 11px; font-weight: 800; color: #fff; background: var(--green);
+    border-radius: 99px; padding: 3px 8px; min-width: 26px; text-align: center;
+  }
+  .rail-foot { padding-top: 12px; border-top: 2px solid var(--line); }
+  .rail-add { width: 100%; min-height: 48px; border-radius: var(--r-md); font-weight: 700; font-size: 14px; color: var(--green-dark); border: 2px dashed var(--line-strong); }
+  .rail-add:hover { border-color: var(--green); background: var(--green-wash); }
+
+  .tabbar { display: none; }
+  .hud-course { display: none; }
+  .hud { padding: 18px 28px; justify-content: flex-end; }
+  .hud-simple { justify-content: space-between; }
+  .scroll { padding: 22px 28px 48px; }
+
+  .wide-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; align-items: start; }
+  .wide-main { min-width: 0; max-width: 620px; }
+  .wide-side { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 8px; }
+  .side-card { background: var(--paper); border: 2px solid var(--line); border-radius: var(--r-lg); padding: 16px; }
+  .side-card h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--ink-faint); margin-bottom: 10px; }
+  .side-card p { margin: 0 0 12px; font-size: 14px; line-height: 1.45; font-weight: 600; }
+  .side-big { display: block; font-size: 36px; font-weight: 800; color: var(--green-dark); line-height: 1; margin-bottom: 12px; }
+  .side-weak { display: flex; flex-direction: column; gap: 8px; }
+  .side-weak .weak-item { padding: 10px; border-width: 2px; }
+  .side-weak .weak-item b { font-size: 12px; }
+
+  /* The winding path is a phone affordance. On a wide screen the offsets just
+     look like a misaligned list, so the nodes straighten out. */
+  .node-row { transform: none !important; justify-content: flex-start; padding: 4px 0; }
+  .node { grid-auto-flow: column; grid-template-columns: auto 1fr; justify-items: start; gap: 14px; width: 100%; }
+  .node-btn { width: 54px; height: 50px; font-size: 21px; }
+  .node-label { margin-top: 0; max-width: none; text-align: left; font-size: 13px; -webkit-line-clamp: 1; }
+  .node.is-current::before { display: none; }
+  .node-start { position: static; align-self: center; margin-left: auto; animation: none; }
+  .unit-head { position: static; }
+
+  .session-inner { width: min(680px, 100%); margin: 0 auto; }
+  .session-body { padding: 32px 28px; }
+  .session-foot { padding: 18px 28px 22px; }
+  .session h1 { font-size: 26px; }
+  .prompt { font-size: 25px; }
+  .choice { min-height: 58px; display: flex; align-items: center; gap: 12px; }
+  .choice:hover:not([disabled]) { border-color: var(--blue); background: var(--blue-wash); }
+  .today-card h1 { font-size: 25px; }
   .stat-grid { grid-template-columns: repeat(4, 1fr); }
+  .btn:hover:not([disabled]) { filter: brightness(1.06); }
 }
 
-/* The path rows are translated for the winding look; clip the overhang so a
-   stray transform can never create a horizontal scrollbar on a narrow phone. */
-.path-units { overflow-x: clip; }
+/* Choice number badges: a keyboard affordance on laptop, quiet on phone. */
+.choice-key {
+  display: none; flex: none; width: 26px; height: 26px; border-radius: 7px;
+  background: var(--wash); border: 1px solid var(--line-strong);
+  font-size: 12px; font-weight: 800; color: var(--ink-soft);
+  align-items: center; justify-content: center;
+}
+@media (min-width: 900px) { .choice-key { display: inline-flex; } }
+.choice-text { flex: 1; }
+.choice.is-right .choice-key { border-color: var(--green); color: var(--green-dark); }
+.choice.is-wrong .choice-key { border-color: var(--red); color: var(--red); }
+
+.recall-hint { display: none; margin-top: 8px; color: var(--ink-faint); font-size: 12px; }
+@media (min-width: 900px) { .recall-hint { display: block; } }
+kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+  border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px;
+  padding: 1px 5px; margin-left: 4px; color: var(--ink-soft); background: var(--paper);
+}
+.btn-primary kbd { border-color: rgba(255,255,255,.5); color: #fff; background: transparent; }
+
+.sheet-option { gap: 12px; }
+.sheet-flag {
+  flex: none; font-size: 10px; font-weight: 800; background: var(--blue-wash); color: #0b5fbf;
+  padding: 7px 8px; border-radius: 8px; min-width: 54px; text-align: center;
+}
+.sheet-copy { flex: 1; min-width: 0; }
+.sheet-copy b { display: block; font-size: 14px; }
+.sheet-copy small { display: block; color: var(--ink-soft); font-size: 12px; font-weight: 500; }
+
+.worked-answer { font-weight: 700; }
+
+/* KaTeX must never widen a column; long display math scrolls on its own. */
+.katex { font-size: 1.04em; }
+.katex-display { margin: 10px 0; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
+.prompt .katex, .choice .katex { font-size: 1em; }
+
+/* Focus must be visible for keyboard-first laptop use. */
+:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; border-radius: 6px; }

@@ -306,3 +306,87 @@ class PathTest(unittest.TestCase):
         units = self.api.path()["units"]
         self.assertEqual(units[0]["course"], "MA 26100")
         self.assertEqual(units[0]["days_left"], 2)
+
+
+class ClassSwitcherTest(unittest.TestCase):
+    """The macro switcher must come from the data, not a maintained list.
+
+    The whole point of the content boundary is that importing material for a
+    new subject makes that subject appear with no code or config change.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.temp.name) / "study.db"
+        self.api = web.StudyAPI(self.db_path)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def _seed(self, campaign: str, topics, course_id=None, hash_suffix=""):
+        with study.connect(self.db_path) as db:
+            material = db.execute(
+                "INSERT INTO materials(title,path,content,content_hash,created_at,campaign,course_id) VALUES (?,?,?,?,?,?,?)",
+                (f"{campaign} notes", "memory", "content", f"hash-{campaign}{hash_suffix}",
+                 study.now().isoformat(), campaign, course_id),
+            ).lastrowid
+            for index, topic in enumerate(topics, 1):
+                qid = db.execute(
+                    """INSERT INTO questions
+                       (material_id,prompt,answer,explanation,topic,kind,difficulty,source_quote,created_at)
+                       VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (material, f"Q{index}", f"A{index}", "why", topic, "recall", 3, "quote",
+                     study.now().isoformat()),
+                ).lastrowid
+                db.execute("INSERT INTO progress(question_id,due_at) VALUES (?,?)", (qid, study.now().isoformat()))
+            db.commit()
+            return material
+
+    def test_a_newly_imported_subject_appears_with_no_configuration(self):
+        self.assertEqual(self.api.classes()["classes"], [])
+        self._seed("PHYS 172", ["Momentum", "Energy"])
+        names = [item["name"] for item in self.api.classes()["classes"]]
+        self.assertEqual(names, ["PHYS 172"])
+
+    def test_each_class_reports_its_own_counts(self):
+        self._seed("PHYS 172", ["Momentum", "Energy"])
+        self._seed("CS 18000", ["Recursion"])
+        found = {item["name"]: item for item in self.api.classes()["classes"]}
+        self.assertEqual(found["PHYS 172"]["questions"], 2)
+        self.assertEqual(found["PHYS 172"]["topics"], 2)
+        self.assertEqual(found["CS 18000"]["questions"], 1)
+        self.assertEqual(self.api.classes()["totals"]["questions"], 3)
+
+    def test_the_class_with_the_nearest_exam_is_offered_first(self):
+        from datetime import date, timedelta
+
+        with study.connect(self.db_path) as db:
+            far = db.execute("INSERT INTO courses(code,title,created_at) VALUES (?,?,?)",
+                             ("CS 18000", "Problem Solving", study.now().isoformat())).lastrowid
+            near = db.execute("INSERT INTO courses(code,title,created_at) VALUES (?,?,?)",
+                              ("PHYS 172", "Mechanics", study.now().isoformat())).lastrowid
+            db.execute("INSERT INTO exams(course_id,title,exam_date,created_at) VALUES (?,?,?,?)",
+                       (far, "Midterm", (date.today() + timedelta(days=28)).isoformat(), study.now().isoformat()))
+            db.execute("INSERT INTO exams(course_id,title,exam_date,created_at) VALUES (?,?,?,?)",
+                       (near, "Quiz", (date.today() + timedelta(days=2)).isoformat(), study.now().isoformat()))
+            db.commit()
+        self._seed("CS 18000", ["Recursion"], course_id=far)
+        self._seed("PHYS 172", ["Momentum"], course_id=near)
+        classes = self.api.classes()["classes"]
+        self.assertEqual(classes[0]["name"], "PHYS 172")
+        self.assertEqual(classes[0]["days_left"], 2)
+        self.assertEqual(classes[0]["next_exam"], "Quiz")
+
+    def test_a_long_course_code_gets_a_badge_that_is_still_the_class(self):
+        self.assertEqual(web._short_label("MA 26100"), "MA 261")
+        self.assertEqual(web._short_label("STAT 35000"), "STAT 350")
+        self.assertEqual(web._short_label("Putnam"), "Putnam")
+
+    def test_a_subject_with_no_questions_is_not_offered(self):
+        with study.connect(self.db_path) as db:
+            db.execute(
+                "INSERT INTO materials(title,path,content,content_hash,created_at,campaign) VALUES (?,?,?,?,?,?)",
+                ("Empty", "memory", "content", "hash-empty", study.now().isoformat(), "EMPTY 101"),
+            )
+            db.commit()
+        self.assertEqual([item["name"] for item in self.api.classes()["classes"]], [])

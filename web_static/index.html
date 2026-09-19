@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#ffffff">
   <meta name="description" content="Every class, one path. Short sessions that cover all the material and get you exam-ready.">
   <title>Intellect</title>
@@ -11,48 +11,120 @@
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Intellect">
   <link rel="stylesheet" href="/vendor/katex/katex.min.css">
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
-  <!-- HOME: the path -->
-  <main class="screen is-active" id="screen-path">
-    <header class="hud">
-      <button class="hud-course" id="course-switch" aria-haspopup="listbox">
-        <span class="hud-course-flag" id="course-flag">ALL</span>
-        <span class="hud-course-name" id="course-name">All classes</span>
-        <span class="hud-caret" aria-hidden="true">▾</span>
-      </button>
-      <div class="hud-stats">
-        <span class="stat stat-streak" id="stat-streak" title="Day streak"><i aria-hidden="true">🔥</i><b>0</b></span>
-        <span class="stat stat-xp" id="stat-xp" title="XP"><i aria-hidden="true">⚡</i><b>0</b></span>
-        <span class="stat stat-hearts" id="stat-hearts" title="Hearts"><i aria-hidden="true">♥</i><b>5</b></span>
-      </div>
-    </header>
+<div class="app">
 
-    <div class="scroll" id="path-scroll">
-      <section class="today-card" id="today-card">
-        <div class="today-copy">
-          <span class="today-kicker" id="today-kicker">Today</span>
-          <h1 id="today-title">Loading your path…</h1>
-          <p id="today-sub">One short set, picked from what is weakest and closest to an exam.</p>
-        </div>
-        <div class="today-ring" id="today-ring" role="img" aria-label="Daily goal progress">
-          <span id="today-ring-label">0/40</span>
-        </div>
-      </section>
-
-      <div id="exam-rail" class="exam-rail" hidden></div>
-
-      <div id="path-units" class="path-units"></div>
-
-      <div class="path-end" id="path-end" hidden>
-        <p>That is every unit you have imported.</p>
-        <button class="btn btn-ghost" id="path-add">Add more material</button>
-      </div>
+  <!-- CLASS RAIL: the macro switcher. Sidebar on laptop, sheet on phone. -->
+  <aside class="rail" id="class-rail" aria-label="Classes">
+    <div class="rail-brand"><span class="rail-logo" aria-hidden="true">◆</span><b>Intellect</b></div>
+    <nav class="rail-classes" id="rail-classes" aria-label="Switch class"></nav>
+    <div class="rail-foot">
+      <button class="rail-add" id="rail-import">＋ Add material</button>
     </div>
+  </aside>
+
+  <div class="main">
+    <!-- PATH -->
+    <main class="screen is-active" id="screen-path">
+      <header class="hud">
+        <button class="hud-course" id="course-switch" aria-haspopup="dialog">
+          <span class="hud-course-flag" id="course-flag">ALL</span>
+          <span class="hud-course-name" id="course-name">All classes</span>
+          <span class="hud-caret" aria-hidden="true">▾</span>
+        </button>
+        <div class="hud-stats">
+          <span class="stat stat-streak" id="stat-streak" title="Day streak"><i aria-hidden="true">🔥</i><b>0</b></span>
+          <span class="stat stat-xp" id="stat-xp" title="XP"><i aria-hidden="true">⚡</i><b>0</b></span>
+          <span class="stat stat-hearts" id="stat-hearts" title="Hearts"><i aria-hidden="true">♥</i><b>5</b></span>
+        </div>
+      </header>
+
+      <div class="scroll">
+        <div class="wide-grid">
+          <div class="wide-main">
+            <section class="today-card" id="today-card" role="button" tabindex="0">
+              <div class="today-copy">
+                <span class="today-kicker" id="today-kicker">Today</span>
+                <h1 id="today-title">Loading your path…</h1>
+                <p id="today-sub">One short set, picked from what is weakest and closest to an exam.</p>
+              </div>
+              <div class="today-ring" id="today-ring" role="img" aria-label="Daily goal progress">
+                <span id="today-ring-label">0/40</span>
+              </div>
+            </section>
+
+            <div id="exam-rail" class="exam-rail" hidden></div>
+            <div id="path-units" class="path-units"></div>
+            <div class="path-end" id="path-end" hidden>
+              <p>That is every unit you have imported.</p>
+              <button class="btn btn-ghost" id="path-add">Add more material</button>
+            </div>
+          </div>
+
+          <!-- Laptop-only side rail: the context a bigger screen can afford. -->
+          <aside class="wide-side" aria-label="At a glance">
+            <section class="side-card">
+              <h3>Up next</h3>
+              <p id="side-next">—</p>
+              <button class="btn btn-primary btn-block" id="side-start">Start <kbd>S</kbd></button>
+            </section>
+            <section class="side-card">
+              <h3>Due now</h3>
+              <b class="side-big" id="side-due">—</b>
+              <button class="btn btn-ghost btn-block" id="side-review">Review these</button>
+            </section>
+            <section class="side-card">
+              <h3>Weakest topics</h3>
+              <div id="side-weak" class="side-weak"></div>
+            </section>
+          </aside>
+        </div>
+      </div>
+    </main>
+
+    <!-- REVIEW -->
+    <main class="screen" id="screen-review">
+      <header class="hud hud-simple"><h2>Review</h2></header>
+      <div class="scroll">
+        <section class="review-hero">
+          <div class="review-count"><b id="review-due">—</b><span>due now</span></div>
+          <p>Spaced review is the part that makes it stick. These are the items your memory is about to drop.</p>
+          <button class="btn btn-primary" id="start-review">Start review</button>
+        </section>
+        <h3 class="section-title">Weakest topics</h3>
+        <div id="weak-list" class="weak-list"></div>
+      </div>
+    </main>
+
+    <!-- LIBRARY -->
+    <main class="screen" id="screen-library">
+      <header class="hud hud-simple"><h2>Library</h2><button class="hud-action" id="library-import" aria-label="Add material">＋</button></header>
+      <div class="scroll"><div id="library-grid" class="library-grid"></div></div>
+    </main>
+
+    <!-- YOU -->
+    <main class="screen" id="screen-you">
+      <header class="hud hud-simple"><h2>You</h2></header>
+      <div class="scroll">
+        <section class="you-card">
+          <div class="you-avatar" aria-hidden="true">🦉</div>
+          <b id="you-companion">Nightling</b>
+          <small id="you-rank">Rank D</small>
+        </section>
+        <div class="stat-grid">
+          <div class="stat-tile"><b id="you-streak">0</b><span>day streak</span></div>
+          <div class="stat-tile"><b id="you-xp">0</b><span>total XP</span></div>
+          <div class="stat-tile"><b id="you-accuracy">—</b><span>strong recall</span></div>
+          <div class="stat-tile"><b id="you-questions">0</b><span>items known</span></div>
+        </div>
+        <h3 class="section-title">Courses</h3>
+        <div id="you-courses" class="course-list"></div>
+      </div>
+    </main>
 
     <nav class="tabbar" aria-label="Main">
       <button class="tab is-active" data-screen="path"><i aria-hidden="true">🏠</i><span>Path</span></button>
@@ -60,78 +132,19 @@
       <button class="tab" data-screen="library"><i aria-hidden="true">📚</i><span>Library</span></button>
       <button class="tab" data-screen="you"><i aria-hidden="true">🦉</i><span>You</span></button>
     </nav>
-  </main>
+  </div>
+</div>
 
-  <!-- REVIEW hub -->
-  <main class="screen" id="screen-review">
-    <header class="hud hud-simple"><h2>Review</h2></header>
-    <div class="scroll">
-      <section class="review-hero">
-        <div class="review-count"><b id="review-due">—</b><span>due now</span></div>
-        <p>Spaced review is the part that makes it stick. These are the items your memory is about to drop.</p>
-        <button class="btn btn-primary" id="start-review">Start review</button>
-      </section>
-      <h3 class="section-title">Weakest topics</h3>
-      <div id="weak-list" class="weak-list"></div>
-    </div>
-    <nav class="tabbar" aria-label="Main">
-      <button class="tab" data-screen="path"><i aria-hidden="true">🏠</i><span>Path</span></button>
-      <button class="tab is-active" data-screen="review"><i aria-hidden="true">🎯</i><span>Review</span></button>
-      <button class="tab" data-screen="library"><i aria-hidden="true">📚</i><span>Library</span></button>
-      <button class="tab" data-screen="you"><i aria-hidden="true">🦉</i><span>You</span></button>
-    </nav>
-  </main>
+<!-- SESSION: takes the whole window on every device -->
+<main class="screen session" id="screen-session">
+  <header class="session-top">
+    <button class="quit" id="session-quit" aria-label="Quit session">✕</button>
+    <div class="progress" aria-hidden="true"><i id="session-bar"></i></div>
+    <span class="hearts" id="session-hearts">♥♥♥♥♥</span>
+  </header>
 
-  <!-- LIBRARY -->
-  <main class="screen" id="screen-library">
-    <header class="hud hud-simple"><h2>Library</h2><button class="hud-action" id="library-import">＋</button></header>
-    <div class="scroll">
-      <div id="library-grid" class="library-grid"></div>
-    </div>
-    <nav class="tabbar" aria-label="Main">
-      <button class="tab" data-screen="path"><i aria-hidden="true">🏠</i><span>Path</span></button>
-      <button class="tab" data-screen="review"><i aria-hidden="true">🎯</i><span>Review</span></button>
-      <button class="tab is-active" data-screen="library"><i aria-hidden="true">📚</i><span>Library</span></button>
-      <button class="tab" data-screen="you"><i aria-hidden="true">🦉</i><span>You</span></button>
-    </nav>
-  </main>
-
-  <!-- YOU -->
-  <main class="screen" id="screen-you">
-    <header class="hud hud-simple"><h2>You</h2></header>
-    <div class="scroll">
-      <section class="you-card">
-        <div class="you-avatar" id="you-avatar" aria-hidden="true">🦉</div>
-        <b id="you-companion">Nightling</b>
-        <small id="you-rank">Rank D</small>
-      </section>
-      <div class="stat-grid">
-        <div class="stat-tile"><b id="you-streak">0</b><span>day streak</span></div>
-        <div class="stat-tile"><b id="you-xp">0</b><span>total XP</span></div>
-        <div class="stat-tile"><b id="you-accuracy">—</b><span>strong recall</span></div>
-        <div class="stat-tile"><b id="you-questions">0</b><span>items known</span></div>
-      </div>
-      <h3 class="section-title">Courses</h3>
-      <div id="you-courses" class="course-list"></div>
-    </div>
-    <nav class="tabbar" aria-label="Main">
-      <button class="tab" data-screen="path"><i aria-hidden="true">🏠</i><span>Path</span></button>
-      <button class="tab" data-screen="review"><i aria-hidden="true">🎯</i><span>Review</span></button>
-      <button class="tab" data-screen="library"><i aria-hidden="true">📚</i><span>Library</span></button>
-      <button class="tab is-active" data-screen="you"><i aria-hidden="true">🦉</i><span>You</span></button>
-    </nav>
-  </main>
-
-  <!-- SESSION: full-screen, one thing at a time -->
-  <main class="screen session" id="screen-session">
-    <header class="session-top">
-      <button class="quit" id="session-quit" aria-label="Quit session">✕</button>
-      <div class="progress" aria-hidden="true"><i id="session-bar"></i></div>
-      <span class="hearts" id="session-hearts">♥♥♥♥♥</span>
-    </header>
-
-    <div class="session-body" id="session-body">
-      <!-- TEACH -->
+  <div class="session-body">
+    <div class="session-inner">
       <section class="stage" id="stage-teach" hidden>
         <span class="chip" id="teach-chip">New concept</span>
         <h1 id="teach-title"></h1>
@@ -139,17 +152,16 @@
         <div class="teach-scroll" id="teach-body"></div>
       </section>
 
-      <!-- QUESTION -->
       <section class="stage" id="stage-question" hidden>
         <span class="chip" id="q-chip">Recall</span>
         <h1 class="prompt" id="q-prompt"></h1>
         <div class="choices" id="q-choices"></div>
         <div class="recall" id="q-recall" hidden>
-          <textarea id="q-answer" rows="4" placeholder="Answer from memory…"></textarea>
+          <textarea id="q-answer" rows="4" placeholder="Answer from memory…" autocomplete="off" spellcheck="false"></textarea>
+          <small class="recall-hint">Press <kbd>⌘</kbd><kbd>↵</kbd> to check</small>
         </div>
       </section>
 
-      <!-- COMPLETE -->
       <section class="stage stage-done" id="stage-done" hidden>
         <div class="done-burst" aria-hidden="true">🎉</div>
         <h1>Set complete</h1>
@@ -161,8 +173,10 @@
         <p id="done-note"></p>
       </section>
     </div>
+  </div>
 
-    <footer class="session-foot" id="session-foot">
+  <footer class="session-foot">
+    <div class="session-inner">
       <div class="verdict" id="verdict" hidden>
         <div class="verdict-head"><b id="verdict-title"></b><span id="verdict-xp"></span></div>
         <p id="verdict-answer"></p>
@@ -170,36 +184,42 @@
         <details class="verdict-source" id="verdict-source"><summary>Where this comes from</summary><blockquote id="verdict-quote"></blockquote></details>
         <div class="self-rate" id="self-rate" hidden>
           <span>How well did you recall it?</span>
-          <div><button data-rating="again">Again</button><button data-rating="hard">Hard</button><button data-rating="good">Good</button><button data-rating="easy">Easy</button></div>
+          <div>
+            <button data-rating="again">Again <kbd>1</kbd></button>
+            <button data-rating="hard">Hard <kbd>2</kbd></button>
+            <button data-rating="good">Good <kbd>3</kbd></button>
+            <button data-rating="easy">Easy <kbd>4</kbd></button>
+          </div>
         </div>
       </div>
       <button class="btn btn-primary btn-block" id="session-action">Continue</button>
-    </footer>
-  </main>
-
-  <dialog id="import-dialog" aria-labelledby="import-title">
-    <form method="dialog" id="import-form">
-      <div class="dialog-head"><h2 id="import-title">Add material</h2><button value="cancel" class="dialog-close" aria-label="Close">✕</button></div>
-      <label>Title<input id="import-title-input" required placeholder="MA 261 — 15.2 notes"></label>
-      <label>Class<select id="import-campaign"></select></label>
-      <label class="drop-zone" for="file-input"><input type="file" id="file-input" accept=".pdf,.txt,.md,.tex,.csv"><span>Choose a file</span><small>pdf · md · txt · tex · csv</small></label>
-      <label>Or paste it<textarea id="import-content" rows="6" placeholder="Paste notes, a chapter, a problem set…"></textarea></label>
-      <label class="check-row"><input type="checkbox" id="generate-now" checked><span>Turn it into lessons now</span></label>
-      <div class="dialog-actions"><button value="cancel" class="btn btn-ghost">Cancel</button><button type="submit" class="btn btn-primary">Add</button></div>
-    </form>
-  </dialog>
-
-  <div id="course-sheet" class="sheet" hidden>
-    <div class="sheet-panel" role="listbox" aria-label="Pick a class">
-      <div class="sheet-grip" aria-hidden="true"></div>
-      <h3>Study from</h3>
-      <div id="course-options"></div>
     </div>
-  </div>
+  </footer>
+</main>
 
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/vendor/katex/katex.min.js" defer></script>
-  <script src="/vendor/katex/auto-render.min.js" defer></script>
-  <script src="/app.js" defer></script>
+<dialog id="import-dialog" aria-labelledby="import-title">
+  <form method="dialog" id="import-form">
+    <div class="dialog-head"><h2 id="import-title">Add material</h2><button value="cancel" class="dialog-close" aria-label="Close">✕</button></div>
+    <label>Title<input id="import-title-input" required placeholder="MA 261 — 15.2 notes"></label>
+    <label>Class<select id="import-campaign"></select></label>
+    <label class="drop-zone" for="file-input"><input type="file" id="file-input" accept=".pdf,.txt,.md,.tex,.csv"><span>Choose a file</span><small>pdf · md · txt · tex · csv</small></label>
+    <label>Or paste it<textarea id="import-content" rows="6" placeholder="Paste notes, a chapter, a problem set…"></textarea></label>
+    <label class="check-row"><input type="checkbox" id="generate-now" checked><span>Turn it into lessons now</span></label>
+    <div class="dialog-actions"><button value="cancel" class="btn btn-ghost">Cancel</button><button type="submit" class="btn btn-primary">Add</button></div>
+  </form>
+</dialog>
+
+<div id="course-sheet" class="sheet" hidden>
+  <div class="sheet-panel" role="dialog" aria-label="Pick a class" aria-modal="true">
+    <div class="sheet-grip" aria-hidden="true"></div>
+    <h3>Study from</h3>
+    <div id="course-options"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script src="/vendor/katex/katex.min.js" defer></script>
+<script src="/vendor/katex/auto-render.min.js" defer></script>
+<script type="module" src="/app.js"></script>
 </body>
 </html>
