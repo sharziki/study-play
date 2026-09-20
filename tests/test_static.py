@@ -189,10 +189,32 @@ class MathTest(unittest.TestCase):
     def test_generated_content_is_never_injected_as_markup(self):
         self.assertNotIn("dangerouslySetInnerHTML", ALL_TSX)
 
-    def test_display_math_scrolls_instead_of_widening_the_column(self):
-        css = source("index.css")
-        self.assertIn(".katex-display", css)
-        self.assertIn("overflow-x: auto", css)
+    def test_math_rules_survive_the_build(self):
+        """Assert the BUILD, not the source.
+
+        .katex and .katex-display only appear in markup KaTeX creates at
+        runtime, so Tailwind's content scan never sees them. Inside @layer base
+        they were purged from every build: the source had the rules and the
+        shipped CSS had none. A source-only assertion passed the whole time.
+        """
+        built = (ROOT / "web_static" / "index.css").read_text()
+        self.assertIn(".katex-display", built)
+        self.assertIn(".katex{", built.replace(" ", ""))
+
+    def test_wide_inline_math_cannot_clip_the_sentence(self):
+        """Inline math is an unbreakable box. One wide fraction pushed its line
+        past a 390px viewport and clipped the words on either side."""
+        built = (ROOT / "web_static" / "index.css").read_text().replace(" ", "")
+        self.assertIn(".katex{", built)
+        katex_rule = built[built.index(".katex{"):]
+        katex_rule = katex_rule[: katex_rule.index("}")]
+        self.assertIn("max-width:100%", katex_rule)
+        self.assertIn("overflow", katex_rule)
+
+    def test_display_math_is_not_forced_inline(self):
+        """Making every .katex an inline-block collapses centred display math."""
+        built = (ROOT / "web_static" / "index.css").read_text().replace(" ", "")
+        self.assertIn(".katex-display>.katex{", built)
 
 
 class ModularityTest(unittest.TestCase):

@@ -41,11 +41,44 @@
     }
   }
 
-  /* Display math must scroll inside its column rather than widening the page,
-     which on a phone otherwise makes the whole session horizontally pannable. */
-  .katex-display {
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding-bottom: 2px;
-  }
+}
+
+/* KaTeX rules live OUTSIDE @layer base deliberately.
+ *
+ * These class names only ever appear in markup KaTeX creates at runtime, so
+ * Tailwind's content scan never sees them. Inside a layer they were silently
+ * purged from every build: the source file had the rules, the shipped CSS had
+ * none of them. Verified by grepping the build output, which is the only
+ * place that counts.
+ */
+/* Display math must scroll inside its column rather than widening the page,
+   which on a phone otherwise makes the whole session horizontally pannable. */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+}
+
+/* Inline math is an unbreakable box. A single wide expression — a fraction
+   of polynomials, say — pushes its line past the viewport and clips the
+   WORDS on either side, which is how "Why is it valid to factor" lost "is
+   it" and "cancel" on a 390px screen. Found by rendering a real prompt at
+   phone width, not by reading the CSS.
+
+   Each expression scrolls on its own, so the sentence keeps wrapping
+   normally and only the oversized maths pans. */
+.katex {
+  max-width: 100%;
+  display: inline-block;
+  overflow-x: auto;
+  overflow-y: hidden;
+  vertical-align: middle;
+}
+
+/* The display wrapper must not become an inline-block itself, or centred
+   display math collapses to the left of its column. */
+.katex-display > .katex {
+  display: block;
+  max-width: none;
+  overflow: visible;
 }
