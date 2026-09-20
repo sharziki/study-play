@@ -553,8 +553,27 @@ def question_batches(count: int) -> list[int]:
     return batches
 
 
+def _collapsed(text: str) -> str:
+    """Text with every run of whitespace reduced to one space.
+
+    Hard-wrapped material puts newlines inside sentences, so a verbatim quote
+    and its source differ only by where the lines break.
+    """
+    return " ".join((text or "").split())
+
+
 def generation_quality_ok(material: str, quote: str, answer: str) -> bool:
-    if len(quote) < 24 or quote not in material:
+    """Whether a candidate is grounded in the material and not a copy of it.
+
+    The quote must really appear in the source; that check is what stops a
+    hallucinated question from being stored. It compares with whitespace
+    collapsed, because the material is hard-wrapped and a quote spanning a line
+    break is still verbatim. Comparing raw text rejected those, and the failure
+    was invisible: generation reported "Saved 1/8" with no reason, so whole
+    units ended up with one question while the model had produced eight good
+    ones.
+    """
+    if len(quote) < 24 or _collapsed(quote) not in _collapsed(material):
         return False
     normalized_quote = " ".join(re.findall(r"[a-z0-9]+", quote.lower()))
     normalized_answer = " ".join(re.findall(r"[a-z0-9]+", answer.lower()))

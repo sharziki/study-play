@@ -206,6 +206,44 @@ class TopicCoverageTest(unittest.TestCase):
             self.assertEqual(study.uncovered_topics(db, material), [])
 
 
+class GroundingTest(unittest.TestCase):
+    """A quote must be real, and a line break must not make a real one look fake."""
+
+    WRAPPED = (
+        "An exception is an object representing a problem that occurred while the\n"
+        "program was running. Throwing one unwinds the call stack until some\n"
+        "enclosing try block catches it."
+    )
+
+    def test_a_quote_spanning_a_line_break_is_still_verbatim(self):
+        """This silently cost whole units their questions.
+
+        The material is hard-wrapped, so a quote the model copied correctly
+        differs from the source only by where the lines break. Comparing raw
+        text dropped it, and generation reported 'Saved 1/8' with no reason.
+        """
+        quote = "An exception is an object representing a problem that occurred while the program was running."
+        self.assertTrue(study.generation_quality_ok(self.WRAPPED, quote, "an object"))
+
+    def test_a_fabricated_quote_is_still_rejected(self):
+        """The whole point of the check: an unsupported question cannot be stored."""
+        self.assertFalse(
+            study.generation_quality_ok(
+                self.WRAPPED,
+                "Exceptions are stored in a special heap region called the trap table.",
+                "the trap table",
+            )
+        )
+
+    def test_a_trivially_short_quote_is_rejected(self):
+        self.assertFalse(study.generation_quality_ok(self.WRAPPED, "an exception", "x"))
+
+    def test_an_answer_that_merely_copies_the_quote_is_rejected(self):
+        """Recall must be recall, not recognition of a copied sentence."""
+        quote = "An exception is an object representing a problem that occurred while the program was running."
+        self.assertFalse(study.generation_quality_ok(self.WRAPPED, quote, quote))
+
+
 class SaveGateTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
