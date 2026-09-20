@@ -120,6 +120,23 @@ class SubjectNotDocumentTest(unittest.TestCase):
         ):
             self.assertFalse(study.tests_the_subject(prompt), prompt)
 
+    def test_questions_about_how_the_source_is_arranged_are_rejected(self):
+        """Nine of these shipped. The gate caught "the notes say" but not
+        presentation verbs, so questions about the ORDER of a document got
+        through. The learner sees one question at a time and never sees the
+        arrangement, which makes them unanswerable as well as useless."""
+        for prompt in (
+            "The material introduces the IQR as an alternative to the range.",
+            "The unit begins by distinguishing a vector from a point. Why?",
+            "The course catalog places 'the object-oriented approach' after decomposition.",
+            "Why does the material introduce a bar chart at this point?",
+            "In this unit, what is defined first?",
+            # Inverted form. The subject-first patterns missed this entirely.
+            "Why does the material caution against treating all as outliers?",
+            "Why do these notes recommend the median instead?",
+        ):
+            self.assertFalse(study.tests_the_subject(prompt), prompt)
+
     def test_subject_questions_survive_incidental_vocabulary(self):
         """'material', 'text', and 'notes' are ordinary words in real problems."""
         for prompt in (

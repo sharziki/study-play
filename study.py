@@ -491,7 +491,11 @@ State the function or situation in full.
 TEST THE SUBJECT, NOT THE DOCUMENT. Ask about the ideas the material teaches,
 never about the material as an artifact. "According to the notes, how many types
 are there" and "what does the document say the risk is" teach nothing; they
-examine a text the learner will not have during the exam. Study-strategy and
+examine a text the learner will not have during the exam. This includes how the
+source is ARRANGED: "the unit begins by distinguishing...", "the material
+introduces the IQR as an alternative...", and "the course catalog places X after
+Y" are all rejected. The learner sees one question at a time and never sees the
+ordering, so a question about ordering is unanswerable and teaches nothing. Study-strategy and
 formatting advice inside the material is context for how to ask, not a subject
 to be quizzed on.
 
@@ -599,7 +603,22 @@ _DOCUMENT_META = re.compile(
     r"list|lists|mention|mentions|describe|describes|note|notes|call|calls|group|groups|"
     r"divide|divides|recommend|recommends|suggest|suggests|warn|warns)\b"
     r"|\bwhat (?:does|do) (?:the|these|this|your|my)\s+(?:[\w.-]+\s+){0,5}"
-    r"(?:notes?|document|material|text|summary|handout|packet)\b",
+    r"(?:notes?|document|material|text|summary|handout|packet)\b"
+    # Presentation verbs were the gap. "The notes say" was caught, but "the
+    # material introduces", "the unit begins by", and "the course catalog
+    # places" all shipped. They examine how the source is arranged rather than
+    # what it teaches, and the learner never sees that arrangement.
+    r"|\b(?:the|these|this|your|my)\s+(?:[\w.-]+\s+){0,3}"
+    r"(?:notes?|document|material|text|summary|handout|packet|unit|section|chapter|"
+    r"lesson|catalog|catalogue|syllabus|course description)\s+"
+    r"(?:introduces?|presents?|begins?|starts?|opens?|covers?|places?|"
+    r"defines? first|first defines?|then|next)\b"
+    r"|\b(?:in|from) (?:the|this) (?:unit|section|chapter|lesson|material|notes?)\b"
+    # Inverted question form: "Why DOES the material caution...". The clause
+    # order differs, so the subject-first alternations above never matched it.
+    r"|\b(?:does|do|did)\s+(?:the|these|this|your|my)\s+(?:[\w.-]+\s+){0,3}"
+    r"(?:notes?|document|material|text|summary|handout|packet|unit|section|chapter|"
+    r"lesson|catalog|catalogue|syllabus)\s+[a-z]+\b",
     re.IGNORECASE,
 )
 
