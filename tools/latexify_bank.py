@@ -122,6 +122,13 @@ MATH_WORDS = {
     # parameter is typeset: "Poisson(λ)" becomes \(\text{Poisson}(\lambda)\).
     "poisson", "binomial", "normal", "uniform", "exponential", "bernoulli",
     "geometric", "gamma", "beta", "chisq", "student", "cov", "corr", "sd",
+    # Statistics acronyms that label a quantity inside the expression. A
+    # correct rewrite of "SE = 15/√30" produces \(SE = 15/\sqrt{30}\), which
+    # moves the label inside the delimiters — the same way "sin" moves. Without
+    # these, a sound rewrite was rejected as "explanation prose changed", and
+    # the Unicode √ it was fixing stayed in the bank.
+    "lcb", "ucb", "moe", "mse", "sse", "ssa", "sst", "ssr", "rmse", "iqr",
+    "cdf", "pmf", "pdf", "clt", "anova", "lsd", "hsd", "fwer", "sem",
 }
 
 
