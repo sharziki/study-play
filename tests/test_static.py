@@ -148,6 +148,17 @@ class SessionLoopTest(unittest.TestCase):
         self.assertIn("saved.date === today() ?", player)
         self.assertNotIn("purchase", player.lower())
 
+    def test_code_snippets_render_as_code(self):
+        """The CS 18000 questions quote real Java. Without a code span the
+        learner reads the backticks as literal characters, and a snippet
+        containing ^ or _ risks being parsed as maths."""
+        math_text = source("components", "math-text.tsx")
+        self.assertIn("CODE_SPAN", math_text)
+        self.assertIn("<code", math_text)
+        self.assertIn("font-mono", math_text)
+        # KaTeX must skip code, or `a^b` inside a snippet becomes an exponent.
+        self.assertIn('"code"', math_text)
+
     def test_math_still_typesets(self):
         self.assertIn("renderMathInElement", source("components", "math-text.tsx"))
         self.assertIn("vendor/katex/katex.min.js", HTML)

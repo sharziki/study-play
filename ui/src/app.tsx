@@ -52,12 +52,16 @@ export const App = () => {
     [starting]
   );
 
-  // `?start=1` drops straight into a session. This is what a phone home-screen
-  // shortcut points at, so studying is one tap from the lock screen rather
-  // than three.
+  // `?start=1` drops straight into a session, which is what a phone
+  // home-screen shortcut points at: studying is one tap from the lock screen
+  // rather than three. `?start=CS 18000` pins it to one class, so a class with
+  // a distant exam is still reachable in one tap during a week when another
+  // class dominates the queue.
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("start") === null) return;
-    void start({ campaign: usePlayer.getState().campaign || undefined });
+    const requested = new URLSearchParams(window.location.search).get("start");
+    if (requested === null) return;
+    const pinned = requested && requested !== "1" ? requested : undefined;
+    void start({ campaign: pinned ?? usePlayer.getState().campaign ?? undefined });
     // Only ever once per load; the param stays in the URL for the shortcut.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
