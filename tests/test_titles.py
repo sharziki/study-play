@@ -47,6 +47,14 @@ class HumanizeTest(unittest.TestCase):
             "STAT 350 · 2.1 · The Structure of a Data Set",
         )
 
+    def test_a_small_word_after_a_unit_number_stays_capitalised(self):
+        """"5. The Object-Oriented Approach" became "5. the Object-Oriented
+        Approach" in the live database before this case existed."""
+        self.assertEqual(
+            titles.humanize("CS 18000 · 5. The Object-Oriented Approach — Classes"),
+            "CS 18000 · 5. The Object-Oriented Approach — Classes",
+        )
+
     def test_paired_abbreviations_read_as_one_idea(self):
         """"Ci Ht" is two abbreviations for one heading. Expanding each in
         isolation gives "Confidence Interval Hypothesis Testing"."""
@@ -76,7 +84,7 @@ class HumanizeTest(unittest.TestCase):
 
     def test_importer_and_tool_agree_on_the_same_heading(self):
         """A re-import must not reintroduce the heading the tool just fixed."""
-        composed = titles.section_title("STAT 350 ·", "10.3", "ht-for-mean-sigma-unknown")
+        composed = titles.section_title("STAT 350", "10.3", "ht-for-mean-sigma-unknown")
         self.assertEqual(composed, titles.humanize("STAT 350 · 10.3 Ht For Mean Sigma Unknown"))
 
 

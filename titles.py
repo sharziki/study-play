@@ -95,16 +95,24 @@ def humanize(text: str) -> str:
 
 
 def _opens_clause(out: list[str]) -> bool:
-    """Whether the previous token ended a clause, so the next word starts one."""
-    return bool(out) and out[-1].endswith(("·", ":", "—", "-"))
+    """Whether the previous token ended a clause, so the next word starts one.
+
+    A numbered heading is the case that matters: in "CS 18000 · 5. The
+    Object-Oriented Approach", "The" opens the description and must keep its
+    capital, even though it is neither the first word nor a proper noun. An
+    earlier version checked only separators and shipped "5. the Object-Oriented
+    Approach" to the live database.
+    """
+    return bool(out) and out[-1].endswith(("·", ":", "—", "-", ".", "!", "?"))
 
 
 def section_title(course: str, section: str, slug: str) -> str:
     """The full unit heading an importer should store.
 
-    `section` is the syllabus number ("10.3"); `slug` is the filename-derived
-    description. Keeping the composition here means a re-import produces exactly
-    the title the retitling tool would produce for an existing row.
+    `course` is the course code ("STAT 350"), `section` the syllabus number
+    ("10.3"), and `slug` the filename-derived description. Keeping the
+    composition here means a re-import produces exactly the title the retitling
+    tool would produce for an existing row.
     """
     described = humanize(slug.replace("-", " ").title())
     return f"{course} · {section} {described}".rstrip()

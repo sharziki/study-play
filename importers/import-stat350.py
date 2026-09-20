@@ -142,7 +142,7 @@ def main() -> int:
         # "10.3 Ht For Mean Sigma Unknown". `titles` is the single place that
         # decides how a heading reads, shared with tools/retitle_materials.py.
         title = titles.section_title(
-            f"{COURSE} ·", sec.group(1).replace("-", ".") if sec else str(n), slug
+            COURSE, sec.group(1).replace("-", ".") if sec else str(n), slug
         )
         try:
             res = post(title, text)
