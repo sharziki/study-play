@@ -1,4 +1,6 @@
 
+import { Flame } from "lucide-react";
+
 import { cn } from "@/lib/utils";
 import { usePlayer } from "@/store/player";
 import type { ClassSummary, Dashboard } from "@/lib/api";
@@ -17,13 +19,14 @@ export const StatsRail = ({ dashboard, classes }: StatsRailProps) => {
 
   return (
     <div className="sticky top-0 flex flex-col gap-y-4 pt-4">
-      <div className="flex items-center justify-between gap-2 rounded-xl border-2 p-3">
+      <div className="flex items-center justify-between gap-2 rounded-xl border-2 p-3 tabular-nums">
         <div className="flex items-center gap-1.5 font-bold text-orange-500">
           <img src={points} alt="" aria-hidden width={22} height={22} />
           {profile?.xp ?? 0}
         </div>
         <div className="flex items-center gap-1.5 font-bold text-amber-500">
-          🔥 {profile?.daily_streak ?? 0}
+          <Flame className="h-5 w-5 fill-amber-500" />
+          {profile?.daily_streak ?? 0}
         </div>
         <div className="flex items-center gap-1.5 font-bold text-rose-500">
           <img src={heart} alt="" aria-hidden width={22} height={22} />

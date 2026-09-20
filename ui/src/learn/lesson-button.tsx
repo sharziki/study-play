@@ -48,7 +48,12 @@ export const LessonButton = ({
     >
       <div
         className="relative"
-        style={{ right: `${indentationLevel * 40}px`, marginTop: isFirst && !isCompleted ? 60 : 24 }}
+        style={{
+          right: `${indentationLevel * 40}px`,
+          // The "Start" badge floats above the node, so a current node needs
+          // clearance or the badge lands on top of the node above it.
+          marginTop: isFirst ? 60 : current ? 48 : 24,
+        }}
       >
         {current ? (
           <div className="relative h-[102px] w-[102px]">

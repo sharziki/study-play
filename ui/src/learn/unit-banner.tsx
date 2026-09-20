@@ -26,7 +26,7 @@ export const UnitBanner = ({ title, course, examTitle, daysLeft, onContinue }: U
     >
       <div className="min-w-0 space-y-1.5">
         <p className="text-xs font-bold uppercase tracking-wide opacity-80">{course}</p>
-        <h3 className="truncate text-xl font-bold lg:text-2xl">{title}</h3>
+        <h3 className="text-balance text-xl font-bold leading-snug lg:text-2xl">{title}</h3>
         {examTitle && (
           <p className="text-sm opacity-90">
             {examTitle}

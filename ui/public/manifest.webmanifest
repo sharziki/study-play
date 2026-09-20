@@ -1,0 +1,49 @@
+{
+  "name": "Intellect \u2014 study every class",
+  "short_name": "Intellect",
+  "description": "Every class, one path. Short sessions that cover all the material and get you exam-ready.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "categories": [
+    "education",
+    "productivity"
+  ],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Start today's set",
+      "short_name": "Study",
+      "url": "/#start",
+      "description": "Open straight into the next set, no decisions"
+    },
+    {
+      "name": "Review due items",
+      "short_name": "Review",
+      "url": "/#review-now",
+      "description": "Only what your memory is about to drop"
+    }
+  ]
+}

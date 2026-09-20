@@ -12,6 +12,7 @@ web_static. web_static is a build output; only the files Vite does not own
 """
 
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -267,6 +268,23 @@ class ProgressiveWebAppTest(unittest.TestCase):
             self.assertIn(asset, WORKER)
         for stale in ("/api.js", "/session.js", "/player.js", "/math.js", "/app.css"):
             self.assertNotIn(stale, WORKER, "worker still lists a removed module")
+
+    def test_the_worker_version_is_stamped_from_the_build(self):
+        """A cache-first shell with a hand-edited version means an installed
+        PWA can serve a stale bundle forever. That happened twice in one
+        session, so the version is now a hash of the emitted files."""
+        import hashlib
+
+        match = re.search(r'const VERSION = "intellect-([0-9a-f]{12})";', WORKER)
+        self.assertIsNotNone(match, "worker version is not a build stamp")
+        digest = hashlib.sha256()
+        for name in ("app.js", "index.css", "index.html"):
+            digest.update((ROOT / "web_static" / name).read_bytes())
+        self.assertEqual(
+            match.group(1),
+            digest.hexdigest()[:12],
+            "web_static is stale: rebuild with `npm run build` in ui/",
+        )
 
     def test_worker_never_caches_mutations(self):
         """Answers must reach SQLite; a cached write would corrupt mastery."""

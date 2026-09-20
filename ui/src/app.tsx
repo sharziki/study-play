@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Flame } from "lucide-react";
 import { Toaster, toast } from "sonner";
 
 import { StatsRail } from "@/components/stats-rail";
@@ -51,6 +52,16 @@ export const App = () => {
     [starting]
   );
 
+  // `?start=1` drops straight into a session. This is what a phone home-screen
+  // shortcut points at, so studying is one tap from the lock screen rather
+  // than three.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("start") === null) return;
+    void start({ campaign: usePlayer.getState().campaign || undefined });
+    // Only ever once per load; the param stays in the URL for the shortcut.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const exit = useCallback(() => {
     setSession(null);
     void refresh();
@@ -94,10 +105,19 @@ export const App = () => {
 const StatsRailCompact = ({ dashboard }: { dashboard: Dashboard | null }) => {
   const { hearts, goalXP, goalTarget } = usePlayer();
   return (
-    <div className="flex min-w-0 items-center gap-4 text-sm font-bold">
-      <span className="text-orange-500">⚡ {dashboard?.profile.xp ?? 0}</span>
-      <span className="text-amber-500">🔥 {dashboard?.profile.daily_streak ?? 0}</span>
-      <span className="text-rose-500">♥ {hearts}</span>
+    <div className="flex min-w-0 items-center gap-4 text-sm font-bold tabular-nums">
+      <span className="flex items-center gap-1.5 text-orange-500">
+        <img src="/assets/points.svg" alt="" aria-hidden width={18} height={18} />
+        {dashboard?.profile.xp ?? 0}
+      </span>
+      <span className="flex items-center gap-1.5 text-rose-500">
+        <img src="/assets/heart.svg" alt="" aria-hidden width={18} height={18} />
+        {hearts}
+      </span>
+      <span className="flex items-center gap-1.5 text-amber-500">
+        <Flame className="h-4 w-4 fill-amber-500" />
+        {dashboard?.profile.daily_streak ?? 0}
+      </span>
       <span className="truncate text-slate-400">
         {goalXP}/{goalTarget}
       </span>
