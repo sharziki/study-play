@@ -1,0 +1,22 @@
+Intellect bundles work from other MIT-licensed projects.
+
+## sanidhyy/duolingo-clone ("Lingo")
+
+Copyright (c) 2024 Sanidhya Kumar Verma — MIT License
+https://github.com/sanidhyy/duolingo-clone
+
+The learning interface in `ui/` is derived from that project: the button and
+progress primitives, the lesson card / challenge / footer / header /
+question-bubble / result-card components, and the snaking lesson-path button
+geometry. The vendor stack around them (Next.js, Clerk, Stripe, Neon, Drizzle,
+react-admin) was removed; the components now talk to this project's Python and
+SQLite mastery engine instead.
+
+Bundled assets under `ui/public/assets/` also come from that repository, which
+in turn credits:
+
+- Kenney Assets — https://kenney.nl/
+- Freesound — https://freesound.org/
+- ElevenLabs — https://elevenlabs.io/
+
+Full upstream license text: https://github.com/sanidhyy/duolingo-clone/blob/main/LICENSE

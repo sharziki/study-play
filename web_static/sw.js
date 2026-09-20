@@ -9,21 +9,17 @@
  *     which owns mastery and scheduling. A stale write would corrupt progress.
  */
 
-const VERSION = "intellect-v8";
+const VERSION = "intellect-v9";
 const SHELL_CACHE = `${VERSION}-shell`;
 const DATA_CACHE = `${VERSION}-data`;
 
 const SHELL_ASSETS = [
   "/",
   "/index.html",
-  "/app.css",
+  "/index.css",
+  // One bundle now. Vite emits a single entry, so a missing sibling module is
+  // no longer a way to get a blank screen offline.
   "/app.js",
-  // The app is ES modules now. A missing sibling module is a blank screen
-  // offline, not a degraded one, so every one of them is part of the shell.
-  "/api.js",
-  "/session.js",
-  "/player.js",
-  "/math.js",
   "/manifest.webmanifest",
   "/vendor/katex/katex.min.css",
   "/vendor/katex/katex.min.js",

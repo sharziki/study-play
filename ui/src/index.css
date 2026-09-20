@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%;
+    --ring: 199 89% 48%;
+    --ring-offset-background: 0 0% 100%;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-white text-slate-700 antialiased;
+    font-family: ui-rounded, "SF Pro Rounded", "Nunito", system-ui, sans-serif;
+    /* The quiz is a fixed-height column on a phone; the page itself never
+       scrolls, only the question area does. */
+    overscroll-behavior-y: none;
+  }
+
+  .katex { font-size: 1.05em; }
+}
+
+@layer base {
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* Display math must scroll inside its column rather than widening the page,
+     which on a phone otherwise makes the whole session horizontally pannable. */
+  .katex-display {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 2px;
+  }
+}
