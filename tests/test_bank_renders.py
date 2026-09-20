@@ -35,7 +35,14 @@ def bank_fields() -> list[tuple[int, str, str]]:
     db = sqlite3.connect(DB)
     db.row_factory = sqlite3.Row
     rows = []
-    for row in db.execute("SELECT id, prompt, answer, explanation, choices_json FROM questions"):
+    # Only questions the learner can actually be shown. A buried question is
+    # withdrawn from circulation, and its text is kept for review history
+    # rather than for display, so holding it to a rendering standard reports a
+    # defect nobody can encounter.
+    for row in db.execute(
+        "SELECT id, prompt, answer, explanation, choices_json FROM questions "
+        "WHERE status='ready'"
+    ):
         rows.append((row["id"], "prompt", row["prompt"]))
         rows.append((row["id"], "answer", row["answer"]))
         rows.append((row["id"], "explanation", row["explanation"]))
@@ -88,7 +95,9 @@ class BankRendersTest(unittest.TestCase):
         db = sqlite3.connect(DB)
         db.row_factory = sqlite3.Row
         broken = []
-        for row in db.execute("SELECT id, answer, choices_json, correct_choice FROM questions"):
+        for row in db.execute(
+            "SELECT id, answer, choices_json, correct_choice FROM questions WHERE status='ready'"
+        ):
             choices = json.loads(row["choices_json"] or "[]")
             if not choices:
                 continue

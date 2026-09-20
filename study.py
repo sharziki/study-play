@@ -506,7 +506,11 @@ for inline math or \\[ ... \\] for display math. Write \\(n^2\\), never "n²" or
 Write \\(x(\\pi - x)\\), never "x(π−x)". Write \\(\\sqrt{{x}}\\), never "sqrt(x)".
 Write \\(\\mathbb{{E}}[X]\\), \\(\\sigma^2\\), \\(\\binom{{n}}{{k}}\\), \\(\\int_0^1 f\\), \\(\\frac{{a}}{{b}}\\).
 Unicode superscripts, bare carets, and ASCII function names render as literal text
-and are wrong. NEVER use a single $ as a delimiter: currency amounts appear in
+and are wrong. NO Unicode mathematical character may appear outside the delimiters:
+Sigma, union, intersection, element-of, inequality signs, plus-minus, times, middle
+dot, square root, infinity, arrows, and every Greek letter must be written as its
+LaTeX command INSIDE \\( \\). Wrap the WHOLE expression, never a fragment: write
+\\(E[X] = \\sum_x x\\,p_X(x)\\), not "E[X] = " followed by a wrapped Sigma. NEVER use a single $ as a delimiter: currency amounts appear in
 these materials and a lone $ silently turns the text between two prices into math.
 Ordinary prose stays outside the delimiters; only the expressions go inside.
 
@@ -664,9 +668,13 @@ GREEK_COMMANDS = {
     "Ω": r"\Omega",
 }
 
-# Unicode operators and Greek letters render fine as text in a browser; they
-# are not the problem. These are the constructs KaTeX will NOT render and that
-# therefore reach the learner as literal characters.
+# CORRECTION (2026-09-20): an earlier version of this comment claimed Unicode
+# operators "render fine as text" and excluded them. They do render, as prose
+# characters in the body font, which is exactly the problem: "E[X] = Σ x·p_X(x)"
+# sits inside a sentence looking like a typo instead of like mathematics. 72
+# shipped questions looked like that. repair_math still only fixes tokens it
+# can identify with certainty, but has_plaintext_math now REPORTS the rest, so
+# tools/latexify_bank.py can rewrite whole expressions with the model.
 _MATH_SPAN = re.compile(r"\\\((.+?)\\\)|\\\[(.+?)\\\]", re.DOTALL)
 # The base of a superscript can be Greek (σ², Ω²), not only ASCII.
 _SUPERSCRIPT_RUN = re.compile(r"([A-Za-z0-9\)\]\u0370-\u03ff])([⁰¹²³⁴⁵⁶⁷⁸⁹]+)")
@@ -676,6 +684,14 @@ _BARE_CARET = re.compile(r"\b([A-Za-z0-9]+)\^([A-Za-z0-9]+)")
 # \frac{a}{b}. This is the worst case, because the learner sees the markup
 # itself. Found by screenshotting a real question, not by grepping.
 _BARE_SUBSCRIPT = re.compile(r"([A-Za-z][A-Za-z0-9]*)_\{([^{}]{1,60})\}")
+# Unicode mathematics outside \( \). Not auto-repairable token by token, since
+# "Σ x·p_X(x)" is one expression, but always wrong when it reaches the learner.
+_UNICODE_MATH = re.compile(
+    "[⋃⋂∪∩∈∉⊆⊂⊇≤≥≠≈±∞∑∏∫√·×÷←→⇒⇔∀∃∅∂∇"
+    "αβγδεζηθικλμνξπρστυφχψω"
+    "ΓΔΘΛΞΠΣΦΨΩ"
+    "₀₁₂₃₄₅₆₇₈₉]"
+)
 _BARE_COMMAND = re.compile(r"\\[A-Za-z]+(?:\{[^{}]{0,60}\}){0,2}")
 
 
@@ -699,6 +715,7 @@ def has_plaintext_math(text: str) -> bool:
         or _BARE_CARET.search(plain)
         or _BARE_SUBSCRIPT.search(plain)
         or _BARE_COMMAND.search(plain)
+        or _UNICODE_MATH.search(plain)
     )
 
 
