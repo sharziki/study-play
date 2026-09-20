@@ -27,6 +27,69 @@ Different paths give different values.
 """
 
 
+class MathNotationTest(unittest.TestCase):
+    """Maths must be LaTeX inside \\( \\) or the learner sees the markup.
+
+    The generator prompt asks for this, but a prompt is a request. These cover
+    the repair pass that runs on save, which is the part that is enforceable.
+    Every case here was taken from a question that actually shipped.
+    """
+
+    def test_unicode_superscripts_are_wrapped(self):
+        self.assertEqual(study.repair_math("g(n) = n² works"), "g(n) = \\(n^{2}\\) works")
+
+    def test_a_greek_base_becomes_a_latex_command(self):
+        """σ² inside \\( \\) renders as nothing unless σ becomes \\sigma."""
+        self.assertEqual(study.repair_math("σ² is the variance"), "\\(\\sigma^{2}\\) is the variance")
+
+    def test_ascii_roots_are_wrapped(self):
+        self.assertEqual(study.repair_math("compute sqrt(x) now"), "compute \\(\\sqrt{x}\\) now")
+
+    def test_bare_latex_subscripts_are_wrapped(self):
+        self.assertEqual(study.repair_math("uses p_{X,Y}(x,y)"), "uses \\(p_{X,Y}\\)(x,y)")
+
+    def test_operator_names_typeset_upright(self):
+        repaired = study.repair_math("For lim_{(x,y)→(π,0)} the limit")
+        self.assertIn("\\lim_{", repaired)
+        self.assertIn("\\to", repaired)
+        self.assertIn("\\pi", repaired)
+
+    def test_passes_never_nest_inside_each_other(self):
+        """\\(\\(\\lim\\)_{...}\\) renders as nothing at all. This was live."""
+        repaired = study.repair_math("For lim_{(x,y)→(π,0)} the limit")
+        self.assertNotIn("\\(\\(", repaired)
+        self.assertNotIn("\\)\\)", repaired)
+
+    def test_existing_math_is_left_alone(self):
+        for original in ("Already \\(n^2\\) fine", "Display \\[x^2\\] here"):
+            self.assertEqual(study.repair_math(original), original)
+
+    def test_prose_is_not_mistaken_for_mathematics(self):
+        """An earlier version wrapped whole 'mathematical runs' and produced
+        \\(two-path\\) and \\(n^{2} for\\)."""
+        for prose in (
+            "Why does the two-path test show the limit fails?",
+            "The variance is 4 and the mean is 2.",
+            "Under what condition is momentum conserved?",
+        ):
+            self.assertEqual(study.repair_math(prose), prose)
+
+    def test_repair_is_idempotent(self):
+        once = study.repair_math("g(n) = n² and p_{X,Y} and sqrt(x)")
+        self.assertEqual(study.repair_math(once), once)
+
+    def test_unrepaired_plaintext_is_still_reportable(self):
+        self.assertTrue(study.has_plaintext_math("n² outside"))
+        self.assertFalse(study.has_plaintext_math("\\(n^{2}\\) inside"))
+
+    def test_the_generator_is_told_to_write_latex(self):
+        import inspect
+
+        prompt_source = inspect.getsource(study.claude_questions)
+        self.assertIn("MATHEMATICS IS WRITTEN AS MATHEMATICS", prompt_source)
+        self.assertIn("NEVER use a single $", prompt_source)
+
+
 class SelfContainedTest(unittest.TestCase):
     def test_exercise_references_are_rejected(self):
         for prompt in (

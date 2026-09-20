@@ -255,6 +255,24 @@ class StudyAPI:
                 "next_rank_xp": next_rank,
             }
 
+    @staticmethod
+    def _pressure_order(db) -> str:
+        """A SQL fragment ranking courses by exam urgency, most urgent first.
+
+        Built from the same course_pressures() the Python sort uses, so the
+        prefilter and the final ordering cannot disagree. Returns an empty
+        string when nothing is scheduled, leaving the original ordering intact.
+        """
+        pressures = study.course_pressures(db)
+        if not pressures:
+            return ""
+        ranked = sorted(pressures.values(), key=lambda item: -item["pressure"])
+        cases = " ".join(
+            f"WHEN {int(item['course_id'])} THEN {index}" for index, item in enumerate(ranked)
+        )
+        # Courses with no upcoming exam sort after every scheduled one.
+        return f"CASE m.course_id {cases} ELSE {len(ranked)} END ASC,"
+
     def _topic_session(self, limit: int, campaign: str | None, topic: str) -> dict:
         """Build a concept-linked challenge set, ignoring spaced-review due dates."""
         with study.connect(self.db_path) as db:
@@ -296,6 +314,12 @@ class StudyAPI:
         if topic:
             return self._topic_session(limit, campaign, topic)
         with study.connect(self.db_path) as db:
+            # The SQL prefilter decides which rows attempt_priority ever sees, so
+            # it has to know about exam pressure too. Ordering by lapses alone
+            # let bundled examples with 8 lapses fill the whole candidate slice,
+            # and the pressure sort below then had nothing from the course whose
+            # quiz was two days out. Found by reading the live queue, not the code.
+            pressure_order = self._pressure_order(db)
             params: list[object] = [study.now().isoformat()]
             campaign_clause = ""
             if campaign and campaign.lower() != "all":
@@ -309,7 +333,8 @@ class StudyAPI:
                         FROM questions q JOIN progress p ON p.question_id=q.id
                         JOIN materials m ON m.id=q.material_id
                         WHERE q.status='ready' AND p.due_at<=? {campaign_clause}
-                        ORDER BY p.lapses DESC, p.mastery ASC, p.reviews ASC, p.due_at ASC LIMIT ?""",
+                        ORDER BY {pressure_order} p.lapses DESC, p.mastery ASC,
+                                 p.reviews ASC, p.due_at ASC LIMIT ?""",
                     params,
                 )
             )
@@ -328,7 +353,8 @@ class StudyAPI:
                             FROM questions q JOIN progress p ON p.question_id=q.id
                             JOIN materials m ON m.id=q.material_id
                             WHERE q.status='ready' {campaign_clause}
-                            ORDER BY p.mastery ASC, p.reviews ASC, p.due_at ASC LIMIT ?""",
+                            ORDER BY {pressure_order} p.mastery ASC, p.reviews ASC,
+                                     p.due_at ASC LIMIT ?""",
                         params,
                     )
                 )

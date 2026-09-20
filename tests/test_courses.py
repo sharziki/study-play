@@ -150,6 +150,36 @@ class CourseApiTest(unittest.TestCase):
         calc = sum(1 for q in questions if q["course"] == "MA 26100")
         self.assertGreater(calc, len(questions) / 2)
 
+    def test_lapsed_unexamined_material_cannot_crowd_out_an_imminent_exam(self):
+        """The bug this reproduces was live, not hypothetical.
+
+        Bundled example questions had accumulated 8 lapses. The session SQL
+        prefiltered candidates with ORDER BY lapses DESC and only then applied
+        exam pressure in Python, so the pressure sort never saw a single
+        question from the course whose quiz was two days away. Two days before
+        a real calculus quiz the app served demo physics.
+        """
+        self.api.create_course({"code": "MA 26100", "title": "Calc"})
+        self._material("MA 26100", "Limits", count=8)
+        self.api.create_exam({"course": "MA 26100", "title": "Quiz", "date": _iso(2)})
+
+        # Unfiled material with a heavy lapse history and no exam at all. The
+        # pool must exceed the SQL prefilter window (limit * 4) or the Python
+        # sort still sees calculus rows and the bug hides; measured, not
+        # assumed: 20 examples passes even when broken, 60 fails outright.
+        self._material("EXAMPLES", "Newtonian mechanics", count=60)
+        with study.connect(self.db_path) as db:
+            db.execute(
+                """UPDATE progress SET lapses=8 WHERE question_id IN
+                   (SELECT q.id FROM questions q JOIN materials m ON m.id=q.material_id
+                    WHERE m.campaign='EXAMPLES')"""
+            )
+            db.commit()
+
+        questions = self.api.session(limit=8)["questions"]
+        calc = sum(1 for q in questions if q["campaign"] == "MA 26100")
+        self.assertGreater(calc, len(questions) / 2, "imminent quiz lost to unexamined material")
+
     def test_session_reports_upcoming_exams_soonest_first(self):
         self.api.create_course({"code": "MA 26100", "title": "Calc"})
         self.api.create_course({"code": "CS 18000", "title": "Programming"})
@@ -183,6 +213,22 @@ class CourseApiTest(unittest.TestCase):
             study.attempt_priority(weak, pressures),
             study.attempt_priority(strong, pressures),
         )
+
+    def test_unscheduled_material_yields_to_an_examined_course(self):
+        """Found by using it: two days before a calculus quiz the queue served
+        bundled physics examples, because a course with no exam and a course
+        with a distant exam were both weighted 1.0."""
+        pressures = {1: {"pressure": 1.0}}
+        scheduled = {"mastery": 0.5, "lapses": 0, "reviews": 3, "course_id": 1}
+        unscheduled = {"mastery": 0.5, "lapses": 0, "reviews": 3, "course_id": 99}
+        self.assertGreater(
+            study.attempt_priority(scheduled, pressures),
+            study.attempt_priority(unscheduled, pressures),
+        )
+
+    def test_unscheduled_material_is_still_reachable(self):
+        unscheduled = {"mastery": 0.0, "lapses": 0, "reviews": 0, "course_id": 99}
+        self.assertGreater(study.attempt_priority(unscheduled, {}), 0)
 
     def test_priority_tolerates_rows_without_course_context(self):
         unassigned = {"mastery": 0.2, "lapses": 0, "reviews": 1, "course_id": None}

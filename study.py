@@ -289,6 +289,11 @@ def course_pressures(db: sqlite3.Connection, today: date | None = None) -> dict[
     return pressures
 
 
+# Weight for material with no exam attached. Below the 1.0 of a scheduled but
+# distant exam, and far below an imminent one.
+UNSCHEDULED_PRESSURE = 0.5
+
+
 def attempt_priority(row: sqlite3.Row, pressures: dict[int, dict]) -> float:
     """Rank one candidate question for the next attempt.
 
@@ -306,8 +311,15 @@ def attempt_priority(row: sqlite3.Row, pressures: dict[int, dict]) -> float:
     need = (1.0 - min(max(mastery, 0.0), 1.0)) + min(lapses, 5.0) * 0.4
     if reviews == 0:
         need += 0.25
-    pressure = (pressures.get(course_id) or {}).get("pressure", 1.0)
-    return need * pressure
+    # A course with no upcoming exam is not equivalent to one whose exam is
+    # far away. Treating both as 1.0 let ungraded material (bundled examples,
+    # competition papers) tie with real coursework, and the queue served demo
+    # physics two days before a calculus quiz. Unscheduled work stays available
+    # but yields to anything that is actually being examined.
+    course = pressures.get(course_id)
+    if course is None:
+        return need * UNSCHEDULED_PRESSURE
+    return need * course.get("pressure", 1.0)
 
 
 def import_material(path: Path, background: bool = True) -> int:
@@ -484,6 +496,16 @@ formatting advice inside the material is context for how to ask, not a subject
 to be quizzed on.
 
 {kind_rule}
+MATHEMATICS IS WRITTEN AS MATHEMATICS. Every mathematical expression in every
+field — prompt, answer, explanation, and choices — must be LaTeX inside \\( ... \\)
+for inline math or \\[ ... \\] for display math. Write \\(n^2\\), never "n²" or "n^2".
+Write \\(x(\\pi - x)\\), never "x(π−x)". Write \\(\\sqrt{{x}}\\), never "sqrt(x)".
+Write \\(\\mathbb{{E}}[X]\\), \\(\\sigma^2\\), \\(\\binom{{n}}{{k}}\\), \\(\\int_0^1 f\\), \\(\\frac{{a}}{{b}}\\).
+Unicode superscripts, bare carets, and ASCII function names render as literal text
+and are wrong. NEVER use a single $ as a delimiter: currency amounts appear in
+these materials and a lone $ silently turns the text between two prices into math.
+Ordinary prose stays outside the delimiters; only the expressions go inside.
+
 Difficulty 1-5. Provide exactly four plausible choices. choices[correct_choice] must exactly equal answer.
 Distractors must encode real misconceptions, not obviously wrong values.
 Each source_quote must be an exact substring of MATERIAL supporting the answer.
@@ -587,13 +609,147 @@ def tests_the_subject(prompt: str) -> bool:
     return not _DOCUMENT_META.search(prompt or "")
 
 
+# Plaintext maths the model still emits despite the prompt rule. A prompt is a
+# request, not a guarantee, so the save path repairs what it can and reports
+# what it cannot. Unicode superscripts and ASCII function names render as
+# literal text in KaTeX, which is how "n²" and "sqrt(x)" reached the bank.
+SUPERSCRIPTS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
+
+# A Greek letter reads fine as prose, but once it is pulled inside \( \) it has
+# to be a LaTeX command or KaTeX renders nothing at all.
+GREEK_COMMANDS = {
+    "α": r"\alpha", "β": r"\beta", "γ": r"\gamma", "δ": r"\delta",
+    "ε": r"\epsilon", "θ": r"\theta", "λ": r"\lambda", "μ": r"\mu",
+    "π": r"\pi", "ρ": r"\rho", "σ": r"\sigma", "τ": r"\tau", "φ": r"\phi",
+    "χ": r"\chi", "ω": r"\omega", "Γ": r"\Gamma", "Δ": r"\Delta",
+    "Θ": r"\Theta", "Λ": r"\Lambda", "Σ": r"\Sigma", "Φ": r"\Phi",
+    "Ω": r"\Omega",
+}
+
+# Unicode operators and Greek letters render fine as text in a browser; they
+# are not the problem. These are the constructs KaTeX will NOT render and that
+# therefore reach the learner as literal characters.
+_MATH_SPAN = re.compile(r"\\\((.+?)\\\)|\\\[(.+?)\\\]", re.DOTALL)
+# The base of a superscript can be Greek (σ², Ω²), not only ASCII.
+_SUPERSCRIPT_RUN = re.compile(r"([A-Za-z0-9\)\]\u0370-\u03ff])([⁰¹²³⁴⁵⁶⁷⁸⁹]+)")
+_ASCII_SQRT = re.compile(r"\bsqrt\s*\(([^()]{1,40})\)")
+_BARE_CARET = re.compile(r"\b([A-Za-z0-9]+)\^([A-Za-z0-9]+)")
+# LaTeX that escaped its delimiters entirely: p_{X,Y}, lim_{(x,y)\to(0,0)},
+# \frac{a}{b}. This is the worst case, because the learner sees the markup
+# itself. Found by screenshotting a real question, not by grepping.
+_BARE_SUBSCRIPT = re.compile(r"([A-Za-z][A-Za-z0-9]*)_\{([^{}]{1,60})\}")
+_BARE_COMMAND = re.compile(r"\\[A-Za-z]+(?:\{[^{}]{0,60}\}){0,2}")
+
+
+def _outside_math(text: str) -> str:
+    """The parts of a string that are not already inside math delimiters."""
+    return _MATH_SPAN.sub(" ", text)
+
+
+def has_plaintext_math(text: str) -> bool:
+    """True when an expression sits outside \\( \\) and will render as literal text.
+
+    Scoped deliberately to the three constructs that are unambiguous: Unicode
+    superscripts, ASCII sqrt(), and a bare caret. Bare Greek letters and
+    operators read correctly as text, so flagging them produced noise without
+    improving anything a learner sees.
+    """
+    plain = _outside_math(text or "")
+    return bool(
+        _SUPERSCRIPT_RUN.search(plain)
+        or _ASCII_SQRT.search(plain)
+        or _BARE_CARET.search(plain)
+        or _BARE_SUBSCRIPT.search(plain)
+        or _BARE_COMMAND.search(plain)
+    )
+
+
+# Function names that must be LaTeX operators to typeset upright.
+_COMMAND_NAMES = {
+    "lim": r"\lim", "log": r"\log", "ln": r"\ln", "max": r"\max",
+    "min": r"\min", "sup": r"\sup", "inf": r"\inf", "sum": r"\sum",
+}
+
+
+def _latex_body(body: str) -> str:
+    """Translate Unicode inside a subscript that is about to become LaTeX."""
+    for symbol, command in GREEK_COMMANDS.items():
+        body = body.replace(symbol, command + " ")
+    return body.replace("→", r"\to ").replace("−", "-").strip()
+
+
+def repair_math(text: str) -> str:
+    """Wrap plaintext maths that would otherwise render as literal characters.
+
+    Two rules earned the hard way:
+
+    Only unambiguous tokens are touched. An earlier version tried to detect
+    whole "mathematical runs" and wrap them; running it showed prose and
+    notation share a line, so it produced \\(n^{2} for\\) and \\(two-path\\).
+
+    Each pass masks what it produces. Without that, a later pass re-entered an
+    earlier pass's output and built \\(\\(\\lim\\)_{...}\\), which KaTeX
+    renders as nothing at all. Found by screenshotting a live question.
+    """
+    if not text:
+        return text
+
+    def fix(segment: str) -> str:
+        done: list[str] = []
+
+        def stash(fragment: str) -> str:
+            done.append(fragment)
+            return f"\0{len(done) - 1}\0"
+
+        def wrap(fragment: str) -> str:
+            return stash(f"\\({fragment}\\)")
+
+        # Subscripts claim their body FIRST. A subscript can contain a caret
+        # ("c_{2^k,i}"), and letting the caret pass run first injected \\( \\)
+        # inside the braces, producing "c_{\\(2^{k}\\),i}" — markup the learner
+        # reads literally. Caught by validating the bank, not by unit cases.
+        segment = _BARE_SUBSCRIPT.sub(
+            lambda m: wrap("{}_{{{}}}".format(
+                _COMMAND_NAMES.get(m.group(1), m.group(1)), _latex_body(m.group(2))
+            )),
+            segment,
+        )
+        segment = _SUPERSCRIPT_RUN.sub(
+            lambda m: wrap("{}^{{{}}}".format(
+                GREEK_COMMANDS.get(m.group(1), m.group(1)),
+                m.group(2).translate(SUPERSCRIPTS),
+            )),
+            segment,
+        )
+        segment = _ASCII_SQRT.sub(lambda m: wrap(f"\\sqrt{{{m.group(1)}}}"), segment)
+        segment = _BARE_CARET.sub(lambda m: wrap(f"{m.group(1)}^{{{m.group(2)}}}"), segment)
+        segment = _BARE_COMMAND.sub(lambda m: wrap(m.group(0)), segment)
+
+        return re.sub(r"\0(\d+)\0", lambda m: done[int(m.group(1))], segment)
+
+    # Never touch what is already inside delimiters.
+    out, last = [], 0
+    for match in _MATH_SPAN.finditer(text):
+        out.append(fix(text[last:match.start()]))
+        out.append(match.group(0))
+        last = match.end()
+    out.append(fix(text[last:]))
+    return "".join(out)
+
+
 def save_questions(db: sqlite3.Connection, material: sqlite3.Row, questions: list[dict]) -> int:
     saved = 0
     for q in questions:
         quote = q["source_quote"].strip()
         choices = [choice.strip() for choice in q.get("choices", [])]
         correct_choice = int(q.get("correct_choice", -1))
-        answer = q["answer"].strip()
+        # Repair plaintext maths before anything else looks at the text, so the
+        # stored question is the one the learner will actually see rendered.
+        for field in ("prompt", "answer", "explanation"):
+            if q.get(field):
+                q[field] = repair_math(str(q[field]))
+        choices = [repair_math(choice) for choice in choices]
+        answer = repair_math(q["answer"]).strip()
         prompt_text = q.get("prompt", "")
         if (
             not generation_quality_ok(material["content"], quote, answer) or len(choices) != 4
