@@ -125,5 +125,37 @@ class SharedContractTest(unittest.TestCase):
         )
 
 
+class ShardingTest(unittest.TestCase):
+    """Generating a class is hours of model calls, so the runners shard by
+    material and run in parallel. Two workers touching the same material would
+    generate duplicate questions for the same node."""
+
+    MATERIALS = list(range(1, 14))
+
+    def _shard(self, index: int, count: int) -> list[int]:
+        return [m for position, m in enumerate(self.MATERIALS) if position % count == index]
+
+    def test_every_material_is_claimed_exactly_once(self):
+        claimed = [m for index in range(4) for m in self._shard(index, 4)]
+        self.assertEqual(sorted(claimed), self.MATERIALS)
+        self.assertEqual(len(claimed), len(set(claimed)))
+
+    def test_no_two_shards_overlap(self):
+        for left in range(4):
+            for right in range(left + 1, 4):
+                self.assertEqual(set(self._shard(left, 4)) & set(self._shard(right, 4)), set())
+
+    def test_one_shard_is_the_whole_class(self):
+        self.assertEqual(self._shard(0, 1), self.MATERIALS)
+
+
+class BusyTimeoutTest(unittest.TestCase):
+    def test_a_shared_connection_waits_rather_than_failing(self):
+        """The default is to give up after five seconds and lose a batch that
+        already cost a model call."""
+        db = deepen.share(sqlite3.connect(":memory:"), seconds=30)
+        self.assertEqual(db.execute("PRAGMA busy_timeout").fetchone()[0], 30000)
+
+
 if __name__ == "__main__":
     unittest.main()

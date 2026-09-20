@@ -21,6 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import deepen  # noqa: E402  (shared busy-timeout helper)
 import lessons  # noqa: E402
 import study  # noqa: E402
 
@@ -49,13 +50,22 @@ def main() -> int:
     parser.add_argument("--per-material", type=int, default=2,
                         help="lessons to generate per unit in one pass (default %(default)s)")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--shard", type=int, default=0, help="this worker's index")
+    parser.add_argument("--shards", type=int, default=1, help="how many workers are running")
     args = parser.parse_args()
 
-    db = study.connect()
+    db = deepen.share(study.connect())
     materials = ordered_materials(db, args.campaign)
     if not materials:
         print(f"No material for {args.campaign!r}.")
         return 1
+
+    # Split by material so two workers never teach the same node. A lesson is
+    # two model calls when the notation needs a second pass, so a whole class is
+    # hours; the exam-pressure ordering is preserved inside each shard.
+    if args.shards > 1:
+        materials = [m for index, m in enumerate(materials) if index % args.shards == args.shard]
+        print(f"shard {args.shard}/{args.shards}: {len(materials)} unit(s)")
 
     if args.dry_run:
         untaught = sum(len(lessons.untaught_topics(db, m["id"])) for m in materials)

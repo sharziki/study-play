@@ -30,15 +30,28 @@ def main() -> int:
                         help="questions a node should hold (default %(default)s)")
     parser.add_argument("--limit", type=int, help="stop after this many materials")
     parser.add_argument("--dry-run", action="store_true", help="report the gap without calling the model")
+    parser.add_argument("--shard", type=int, default=0,
+                        help="this worker's index, for running several in parallel")
+    parser.add_argument("--shards", type=int, default=1,
+                        help="how many workers are running (default %(default)s)")
     args = parser.parse_args()
 
-    db = study.connect()
+    db = deepen.share(study.connect())
     materials = db.execute(
         "SELECT * FROM materials WHERE campaign=? ORDER BY id", (args.campaign,)
     ).fetchall()
     if not materials:
         print(f"No material for {args.campaign!r}.")
         return 1
+
+    # A class is hours of sequential model calls, so the work is split by
+    # material. Each worker owns whole materials, which is what makes sharding
+    # safe: two workers never generate for the same topic, so they cannot
+    # duplicate a question or race on the same node. SQLite serialises the
+    # writes, and every worker recomputes its own thin topics from the database.
+    if args.shards > 1:
+        materials = [m for index, m in enumerate(materials) if index % args.shards == args.shard]
+        print(f"shard {args.shard}/{args.shards}: {len(materials)} material(s)")
 
     if args.dry_run:
         short = 0

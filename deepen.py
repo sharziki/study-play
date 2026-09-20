@@ -39,6 +39,19 @@ import study  # noqa: E402
 TARGET_PER_TOPIC = 4
 
 
+def share(db: sqlite3.Connection, seconds: int = 60) -> sqlite3.Connection:
+    """Let a connection wait for another worker's write instead of failing.
+
+    Generating a whole class takes hours, so the runners shard by material and
+    run several at once. The writes are tiny and seconds apart, but SQLite's
+    default behaviour on a locked database is to raise immediately after
+    Python's five-second timeout, which would throw away a batch that already
+    cost a model call. Waiting is free; regenerating is not.
+    """
+    db.execute(f"PRAGMA busy_timeout = {seconds * 1000}")
+    return db
+
+
 def thin_topics(db: sqlite3.Connection, material_id: int, target: int = TARGET_PER_TOPIC) -> list[tuple[str, int]]:
     """Topics in one material that hold fewer questions than a node needs."""
     return [
