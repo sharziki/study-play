@@ -14,3 +14,14 @@ When generating questions:
 - Output only requested structured JSON.
 
 Product learning rules live in `RESEARCH.md`.
+
+## Search open source first
+
+Before hand-writing any named, solved problem — scheduling, parsing, diffing,
+text rendering, auth — search for the maintained open-source implementation and
+record what you found. The interface came from `sanidhyy/duolingo-clone` and
+the scheduler is FSRS (`vendor/fsrs`), both MIT and both attributed in `NOTICE`.
+
+Searching OSS first is not adopting OSS wholesale. Working tested code is an
+asset; harvest the specific piece that is genuinely better and leave the rest.
+Decisions live in `DECISIONS/`.

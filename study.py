@@ -23,6 +23,12 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
+VENDOR = ROOT / "vendor"
+if str(VENDOR) not in sys.path:
+    sys.path.insert(0, str(VENDOR))
+
+from fsrs import Card, Rating, Scheduler, State  # noqa: E402  (vendored, MIT)
+
 STATE = ROOT / ".study"
 DB_PATH = STATE / "study.db"
 LOG_PATH = STATE / "claude.log"
@@ -146,7 +152,10 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
           question_id INTEGER PRIMARY KEY REFERENCES questions(id),
           interval_days REAL NOT NULL DEFAULT 0, due_at TEXT NOT NULL,
           reviews INTEGER NOT NULL DEFAULT 0, lapses INTEGER NOT NULL DEFAULT 0,
-          mastery REAL NOT NULL DEFAULT 0
+          mastery REAL NOT NULL DEFAULT 0,
+          stability REAL, difficulty REAL,
+          fsrs_state INTEGER NOT NULL DEFAULT 1, fsrs_step INTEGER,
+          last_review TEXT
         );
         CREATE TABLE IF NOT EXISTS reviews (
           id INTEGER PRIMARY KEY, question_id INTEGER NOT NULL REFERENCES questions(id),
@@ -217,6 +226,16 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
         db.execute("ALTER TABLE questions ADD COLUMN kind TEXT NOT NULL DEFAULT 'recall'")
     if "mastery" not in progress_columns:
         db.execute("ALTER TABLE progress ADD COLUMN mastery REAL NOT NULL DEFAULT 0")
+    if "stability" not in progress_columns:
+        db.execute("ALTER TABLE progress ADD COLUMN stability REAL")
+    if "difficulty" not in progress_columns:
+        db.execute("ALTER TABLE progress ADD COLUMN difficulty REAL")
+    if "fsrs_state" not in progress_columns:
+        db.execute("ALTER TABLE progress ADD COLUMN fsrs_state INTEGER NOT NULL DEFAULT 1")
+    if "fsrs_step" not in progress_columns:
+        db.execute("ALTER TABLE progress ADD COLUMN fsrs_step INTEGER")
+    if "last_review" not in progress_columns:
+        db.execute("ALTER TABLE progress ADD COLUMN last_review TEXT")
     if "shards" not in profile_columns:
         db.execute("ALTER TABLE profile ADD COLUMN shards INTEGER NOT NULL DEFAULT 0")
     if "daily_streak" not in profile_columns:
@@ -1094,14 +1113,82 @@ def calibration_label(rating: str, confidence: int) -> str:
     return "UNDERSTATED" if strong else "OVERSTATED"
 
 
+# Scheduling is FSRS (Open Spaced Repetition), vendored under vendor/fsrs.
+# Fuzzing is off so a given memory state always yields the same interval; the
+# tests and the exam-pressure queue both depend on that being deterministic.
+SCHEDULER = Scheduler(enable_fuzzing=False)
+
+RATING_CODES = {
+    "again": Rating.Again,
+    "hard": Rating.Hard,
+    "good": Rating.Good,
+    "easy": Rating.Easy,
+}
+
+
+def _card_from_row(row, reviewed: datetime) -> Card:
+    """Rebuild an FSRS card from a progress row.
+
+    Rows written before FSRS landed have no stability/difficulty, so they enter
+    as fresh learning cards. That loses the old interval but not the review
+    history, and FSRS re-converges within a few reviews, which is cheaper than
+    inventing a fake stability from a multiplier that never modelled memory.
+    """
+    keys = row.keys() if hasattr(row, "keys") else []
+
+    def field(name):
+        return row[name] if name in keys else None
+
+    card = Card()
+    stability = field("stability")
+    difficulty = field("difficulty")
+    if stability is None or difficulty is None:
+        return card
+    card.stability = float(stability)
+    card.difficulty = float(difficulty)
+    card.state = State(int(field("fsrs_state") or State.Learning.value))
+    step = field("fsrs_step")
+    card.step = int(step) if step is not None else None
+    last = field("last_review")
+    card.last_review = datetime.fromisoformat(last) if last else None
+    card.due = reviewed
+    return card
+
+
+def schedule_review(row, rating: str, reviewed: datetime) -> tuple[Card, timedelta]:
+    """Advance one question's memory state and return the new card and delay."""
+    card = SCHEDULER.review_card(
+        _card_from_row(row, reviewed), RATING_CODES[rating], reviewed
+    )[0]
+    return card, card.due - reviewed
+
+
 def next_interval(current: float, rating: str) -> timedelta:
-    if rating == "again":
-        return timedelta(minutes=10)
-    if rating == "hard":
-        return timedelta(days=max(1, current * 1.3))
-    if rating == "good":
-        return timedelta(days=max(1, current * 2.5))
-    return timedelta(days=max(3, current * 4))
+    """Delay for a card whose only known history is its previous interval.
+
+    Kept because the TUI preview and older callers ask for an interval without
+    a full progress row. It routes through FSRS by treating the prior interval
+    as stability, which is the closest honest translation.
+    """
+    reviewed = now()
+    row = {
+        "stability": float(current) if current else None,
+        "difficulty": 5.0 if current else None,
+        "fsrs_state": State.Review.value,
+        "fsrs_step": None,
+        # Without a last review FSRS sees zero elapsed time and treats the card
+        # as reviewed the instant it was scheduled, which inflates stability.
+        # Assume the card came due exactly on time.
+        "last_review": (reviewed - timedelta(days=float(current))).isoformat() if current else None,
+    }
+    return schedule_review(_Row(row), rating, reviewed)[1]
+
+
+class _Row(dict):
+    """Minimal sqlite3.Row stand-in so helpers accept plain dicts."""
+
+    def keys(self):  # noqa: D102
+        return list(super().keys())
 
 
 def record_review(
@@ -1120,9 +1207,17 @@ def record_review(
     xp += pressure_bonus
     drop_chance = shard_drop_chance(q["difficulty"], combo, confidence)
     shards = random.randint(1, 3) if rating in {"good", "easy"} and random.random() < drop_chance else 0
-    delta = next_interval(q["interval_days"], rating)
-    interval_days = delta.total_seconds() / 86400
     reviewed = now()
+    # Read memory state from the row that owns it rather than from the caller's
+    # SELECT. The TUI and the web API join progress with different column lists,
+    # and a missing stability column would silently reset the card every review.
+    memory = db.execute(
+        """SELECT stability, difficulty, fsrs_state, fsrs_step, last_review
+           FROM progress WHERE question_id=?""",
+        (q["id"],),
+    ).fetchone()
+    card, delta = schedule_review(memory, rating, reviewed)
+    interval_days = delta.total_seconds() / 86400
     score = mastery_observation(rating, confidence, response_seconds, target_seconds)
     mastery = q["mastery"] * 0.7 + score * 0.3
     today = reviewed.date().isoformat()
@@ -1141,8 +1236,11 @@ def record_review(
     )
     db.execute(
         """UPDATE progress SET interval_days=?, due_at=?, reviews=reviews+1, mastery=?,
-           lapses=lapses+? WHERE question_id=?""",
-        (interval_days, (reviewed + delta).isoformat(), mastery, rating == "again", q["id"]),
+           lapses=lapses+?, stability=?, difficulty=?, fsrs_state=?, fsrs_step=?,
+           last_review=? WHERE question_id=?""",
+        (interval_days, card.due.isoformat(), mastery, rating == "again",
+         card.stability, card.difficulty, int(card.state), card.step,
+         reviewed.isoformat(), q["id"]),
     )
     db.execute(
         """UPDATE profile SET xp=xp+?, combo=?, best_combo=MAX(best_combo,?),

@@ -96,9 +96,68 @@ class StudyTest(unittest.TestCase):
         self.assertAlmostEqual(perfect - normal, 0.05)
 
     def test_schedule_expands_and_resets(self):
+        # The exact spacing is FSRS's to choose; what this app depends on is the
+        # ordering. A lapse drops back to relearning steps, and better ratings
+        # buy strictly more time.
         self.assertEqual(study.next_interval(4, "again"), timedelta(minutes=10))
-        self.assertEqual(study.next_interval(4, "good"), timedelta(days=10))
-        self.assertEqual(study.next_interval(4, "easy"), timedelta(days=16))
+        hard = study.next_interval(4, "hard")
+        good = study.next_interval(4, "good")
+        easy = study.next_interval(4, "easy")
+        self.assertLess(hard, good)
+        self.assertLess(good, easy)
+        self.assertGreater(hard, timedelta(days=4))
+
+    def test_review_persists_fsrs_memory_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = study.connect(Path(directory) / "test.db")
+            material_id = db.execute(
+                "INSERT INTO materials(title,path,content,content_hash,created_at) VALUES (?,?,?,?,?)",
+                ("Calc", "x", "Limits.", "hash", study.now().isoformat()),
+            ).lastrowid
+            question_id = db.execute(
+                """INSERT INTO questions(material_id,prompt,answer,explanation,topic,difficulty,
+                   source_quote,created_at) VALUES (?,?,?,?,?,?,?,?)""",
+                (material_id, "p", "a", "e", "limits", 2, "Limits.", study.now().isoformat()),
+            ).lastrowid
+            db.execute(
+                "INSERT INTO progress(question_id,due_at) VALUES (?,?)",
+                (question_id, study.now().isoformat()),
+            )
+
+            clock = {"at": study.now()}
+            original_now = study.now
+
+            def review(rating):
+                # Two reviews in the same second are, correctly, not evidence of
+                # extra memory strength. Advance the clock so each review has
+                # real elapsed time for FSRS to learn from.
+                clock["at"] += timedelta(days=3)
+                study.now = lambda: clock["at"]
+                row = db.execute(
+                    """SELECT q.*, p.interval_days, p.reviews, p.lapses, p.mastery
+                       FROM questions q JOIN progress p ON p.question_id=q.id
+                       WHERE q.id=?""",
+                    (question_id,),
+                ).fetchone()
+                try:
+                    study.record_review(db, row, rating, 3, 10.0, False, "")
+                finally:
+                    study.now = original_now
+                return db.execute(
+                    "SELECT stability, difficulty, reviews, interval_days FROM progress WHERE question_id=?",
+                    (question_id,),
+                ).fetchone()
+
+            first = review("good")
+            self.assertIsNotNone(first["stability"])
+            self.assertIsNotNone(first["difficulty"])
+            second = review("good")
+            third = review("good")
+            # Stability must accumulate across spaced reviews; if the card were
+            # rebuilt from scratch each time it would stay flat.
+            self.assertGreater(third["stability"], first["stability"])
+            self.assertGreater(third["interval_days"], second["interval_days"])
+            self.assertEqual(third["reviews"], 3)
 
     def test_rejects_ungrounded_question(self):
         with tempfile.TemporaryDirectory() as directory:

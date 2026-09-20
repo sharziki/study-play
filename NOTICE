@@ -20,3 +20,15 @@ in turn credits:
 - ElevenLabs — https://elevenlabs.io/
 
 Full upstream license text: https://github.com/sanidhyy/duolingo-clone/blob/main/LICENSE
+
+## open-spaced-repetition/py-fsrs
+
+Copyright (c) 2022 Open Spaced Repetition — MIT License
+https://github.com/open-spaced-repetition/py-fsrs
+
+`vendor/fsrs/` is the core of that project at commit 9446cb0: the Scheduler,
+Card, Rating, ReviewLog, and State modules. The `torch`-dependent parameter
+optimizer was deliberately excluded so this app keeps a standard-library-only
+dependency story. It replaces a hand-rolled interval multiplier and now owns
+when each question comes due; exam pressure still owns what is served first.
+See DECISIONS/2026-09-20-search-open-source-first.md.

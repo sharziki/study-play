@@ -23,6 +23,11 @@ import json
 import re
 import sys
 import urllib.request
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import titles  # noqa: E402
 
 SITE = "https://treese41528.github.io/STAT350/Website/"
 BASE = SITE + "chapter{}/index.html"
@@ -133,7 +138,12 @@ def main() -> int:
         n = ch(path)
         slug = re.sub(r"^\d+-\d+-", "", path.rsplit("/", 1)[-1].replace(".html", "")).replace("-", " ")
         sec = re.search(r"(\d+-\d+)", path)
-        title = f"STAT 350 · {sec.group(1).replace('-', '.') if sec else n} {slug.title()}"
+        # The slug is a URL fragment, so `.title()` alone produced headings like
+        # "10.3 Ht For Mean Sigma Unknown". `titles` is the single place that
+        # decides how a heading reads, shared with tools/retitle_materials.py.
+        title = titles.section_title(
+            f"{COURSE} ·", sec.group(1).replace("-", ".") if sec else str(n), slug
+        )
         try:
             res = post(title, text)
         except Exception as e:  # noqa: BLE001
