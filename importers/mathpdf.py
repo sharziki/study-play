@@ -582,6 +582,18 @@ def _is_prose_word(word: str) -> bool:
     return len(word) > 1 and word.lower() not in FUNCTION_NAMES
 
 
+def _stands_alone(text: str, start: int, end: int) -> bool:
+    """Whether a letter run is separated by space from what surrounds it.
+
+    An English word in a question stem has whitespace on both sides. A run of
+    variables does not: it is written directly against its coefficient and its
+    exponent.
+    """
+    before = text[start - 1] if start > 0 else " "
+    after = text[end] if end < len(text) else " "
+    return before in " \t([{" and after in " \t)]}.,;:"
+
+
 # Angle brackets delimit a vector on these papers exactly as parentheses
 # delimit an argument list, so a comma inside one is a separator, not
 # punctuation. Leaving them out split every vector at its first comma.
@@ -638,6 +650,15 @@ def _extend_left(text: str, anchor: int) -> int:
             word_start = cursor - 1
             while word_start > 0 and text[word_start - 1].isalpha():
                 word_start -= 1
+            # Glued to what follows it, a letter run is a variable product, not
+            # a word. `2xy^{2}` contains no spaces, so its `xy` is mathematics,
+            # while the `for` in `x^{y} for x >= 0` stands alone and is prose.
+            # Without this the expression shattered into three fragments with
+            # the variables stranded as prose between them - and each fragment
+            # was valid LaTeX, so KaTeX validation had nothing to report.
+            if cursor == position and not _stands_alone(text, word_start, cursor):
+                position = word_start
+                continue
             # A LaTeX command is one token with its backslash. Splitting
             # `\\frac` between the slash and the name produces `\\(...\\)frac`,
             # which renders the command name as literal prose.
@@ -684,6 +705,9 @@ def _extend_right(text: str, anchor: int) -> int:
             word_end = cursor
             while word_end < len(text) and text[word_end].isalpha():
                 word_end += 1
+            if cursor == position and not _stands_alone(text, cursor, word_end):
+                position = word_end
+                continue
             if _is_prose_word(text[cursor:word_end]):
                 return position
             position = word_end

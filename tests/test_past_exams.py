@@ -104,6 +104,55 @@ class FaithfulnessTest(unittest.TestCase):
         self.assertTrue(mathpdf.is_faithful("The limit does not exist."))
 
 
+class MathWrappingTest(unittest.TestCase):
+    """Marking an expression must not cut it into pieces.
+
+    Every case here produced valid LaTeX in every fragment, so KaTeX
+    validation reported nothing wrong. Only reading the stored question showed
+    the expression had been shattered.
+    """
+
+    def test_a_variable_product_is_not_mistaken_for_a_word(self):
+        """`2xy^{2}` is one expression. Its `xy` is variables, not a word."""
+        wrapped = mathpdf.wrap_math(
+            "the function f (x, y) = x^{2} y^{2} + 6x^{2} y − 2xy^{2} − 12xy. Choose one."
+        )
+        self.assertIn("\\(f (x, y) = x^{2} y^{2} + 6x^{2} y − 2xy^{2} − 12xy\\)", wrapped)
+        self.assertEqual(wrapped.count("\\("), 1)
+
+    def test_a_real_word_still_ends_the_expression(self):
+        """`for` stands alone between two expressions and must stay outside."""
+        wrapped = mathpdf.wrap_math("Let f (x, y) = x^{y} + y^{x} for x ≥ 0.")
+        self.assertIn("for", wrapped)
+        self.assertNotIn("\\(f (x, y) = x^{y} + y^{x} for", wrapped)
+
+    def test_a_vector_is_not_split_at_its_first_comma(self):
+        wrapped = mathpdf.wrap_math("ℓ(t) = ⟨−1 − t, −πt, 1 + 2t⟩")
+        self.assertEqual(wrapped, "\\(ℓ(t) = ⟨−1 − t, −πt, 1 + 2t⟩\\)")
+
+    def test_a_latex_command_is_never_split_from_its_backslash(self):
+        wrapped = mathpdf.wrap_math("Compute \\lim_{x→0} \\frac{a}{b}")
+        self.assertNotIn("\\)frac", wrapped)
+        self.assertNotIn("\\)lim", wrapped)
+
+    def test_prose_with_no_mathematics_is_left_alone(self):
+        for text in ("The limit does not exist.", "Two saddle points.", "Hyperbolas"):
+            self.assertEqual(mathpdf.wrap_math(text), text)
+
+    def test_every_wrapped_question_passes_the_app_s_own_bank_check(self):
+        """study.has_plaintext_math is what the repo uses to catch raw markup."""
+        import study
+
+        samples = [
+            "the function f (x, y) = x^{2} y^{2} − 2xy^{2} − 12xy. Choose one.",
+            "Let f (x, y) = x^{y} + y^{x} for x ≥ 0 and y ≥ 0.",
+            "ℓ(t) = ⟨−1 − t, −πt, 1 + 2t⟩",
+            "r(t) =< 1 − 2 cos t, cos t >, 0 ≤ t ≤ 2π",
+        ]
+        for text in samples:
+            self.assertFalse(study.has_plaintext_math(mathpdf.wrap_math(text)), text)
+
+
 class ExamParsingTest(unittest.TestCase):
     """Questions, options and the official key must line up exactly."""
 
