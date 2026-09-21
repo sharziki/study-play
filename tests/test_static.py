@@ -100,10 +100,17 @@ class PathTest(unittest.TestCase):
         for state in ("locked", "current", "isCompleted"):
             self.assertIn(state, button)
 
-    def test_exactly_one_node_is_advertised_as_the_start(self):
+    def test_exactly_one_node_is_advertised_as_the_entry_point(self):
+        """Only the current node carries a badge, and the badge says which
+        kind of work a tap begins: Learn for a node that teaches, Start for
+        one that tests. Asserted on the badge text rather than on the exact
+        indentation it happened to have when the test was written."""
         button = source("learn", "lesson-button.tsx")
-        self.assertIn(">\n              Start", button)
+        self.assertIn('teaches ? "Learn" : "Start"', button)
         self.assertIn("current ?", button)
+        # A book for a lesson, a star for a question: a tap should not be a
+        # coin flip between reading and being asked.
+        self.assertIn("teaches ? BookOpen", button)
 
     def test_the_exam_clock_is_visible_on_the_path(self):
         """Exam pressure is what makes this scheduler different from a fixed
