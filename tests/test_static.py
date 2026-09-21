@@ -354,3 +354,43 @@ class ProgressiveWebAppTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TeachStepTest(unittest.TestCase):
+    """The lesson screen must exist and be reachable from the path.
+
+    148 lessons were generated and not one could be opened: /api/lesson
+    returned a full first-principles lesson and nothing in the interface
+    called it. The Lingo rebuild carried the quiz over and dropped the lesson
+    screen, and nothing failed, because a missing screen is not a crash.
+    """
+
+    def test_the_interface_calls_the_lesson_endpoints(self):
+        client = source("lib", "api.ts")
+        self.assertIn("/api/lesson", client)
+        self.assertIn("/api/lesson-check", client)
+
+    def test_a_lesson_view_renders_every_taught_part(self):
+        """A lesson is teaching only if its parts reach the screen."""
+        view = source("lesson", "lesson-view.tsx")
+        for field in (
+            "objective", "motivation", "primitives",
+            "derivation_steps", "worked_example", "misconception", "checks",
+        ):
+            self.assertIn(field, view, field)
+
+    def test_tapping_a_node_teaches_before_it_tests(self):
+        """Unsupported retrieval on an unmet concept is a guess, not a test."""
+        learn = source("learn", "learn.tsx")
+        self.assertIn("onTeach", learn)
+        self.assertIn("node.reviews === 0", learn)
+
+    def test_the_answer_key_never_reaches_the_browser(self):
+        """The check's correct_choice is returned only after an attempt."""
+        import web  # noqa: F401
+
+        api = (ROOT / "web.py").read_text(encoding="utf-8")
+        start = api.index("def lesson_session")
+        body = api[start:api.index("def lesson_check")]
+        self.assertIn('"prompt": item["prompt"], "choices": list(item["choices"])', body)
+        self.assertNotIn('"correct_choice"', body)
