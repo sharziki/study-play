@@ -153,6 +153,65 @@ class MathWrappingTest(unittest.TestCase):
             self.assertFalse(study.has_plaintext_math(mathpdf.wrap_math(text)), text)
 
 
+class TopicClassificationTest(unittest.TestCase):
+    """An imported question joins a real concept node, or none at all.
+
+    The path advances on a node's average mastery, so a node holding one
+    question is finished by a single lucky recall - the exact defect deepen.py
+    was written to undo. Naming every topic "Exam 1 Q7" recreates it.
+    """
+
+    TOPICS = [
+        "Line integrals",
+        "Lines and planes",
+        "Limits",
+        "Arc length and curvature",
+        "Vectors",
+        "Surface integrals and the big theorems",
+        "Partial derivatives",
+        "Double integrals",
+    ]
+
+    def classify(self, text):
+        return mathpdf.classify_topic(text, self.TOPICS)
+
+    def test_a_question_joins_the_topic_it_tests(self):
+        self.assertEqual(
+            self.classify("Find a parametrization for the line of intersection between two planes"),
+            "Lines and planes",
+        )
+        self.assertEqual(self.classify("What is the arc length of the curve r(t)"), "Arc length and curvature")
+        self.assertEqual(self.classify("Compute the limit if it exists. lim"), "Limits")
+
+    def test_one_shared_word_is_not_enough_to_file_a_question(self):
+        """`Identify the quadric surface` is Exam 1 shape recognition. It filed
+        itself under Exam 3's surface integrals on the single word surface."""
+        self.assertIsNone(self.classify("Identify the quadric surface 2x^2 + 3y^2 = 4x"))
+
+    def test_a_plural_topic_still_matches_a_singular_question(self):
+        """`Lines and planes` must be reachable from `line` and `plane`.
+
+        An over-eager stemmer cut `lines` to `lin` and `planes` to `plan`, so
+        this topic could never match, while `Line integrals` matched on `line`
+        alone and collected three questions about plane geometry.
+        """
+        self.assertEqual(mathpdf._stem("lines"), "line")
+        self.assertEqual(mathpdf._stem("planes"), "plane")
+        self.assertEqual(mathpdf._stem("derivatives"), "derivative")
+        self.assertEqual(mathpdf._stem("class"), "class")
+
+    def test_a_line_integral_question_still_reaches_line_integrals(self):
+        self.assertEqual(
+            self.classify("let C denote the boundary and compute the line integral"),
+            "Line integrals",
+        )
+
+    def test_nothing_is_filed_when_no_topic_fits(self):
+        """A question about a topic the course has not named goes nowhere."""
+        self.assertIsNone(self.classify("Suppose a particle moves through space with velocity"))
+        self.assertIsNone(mathpdf.classify_topic("anything at all", []))
+
+
 class ExamParsingTest(unittest.TestCase):
     """Questions, options and the official key must line up exactly."""
 

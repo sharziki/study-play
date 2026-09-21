@@ -789,3 +789,79 @@ def wrap_math(text: str) -> str:
         cursor = end
     out.append(text[cursor:])
     return "".join(out)
+
+
+# Words that carry no subject meaning when matching a question to a topic.
+TOPIC_STOPWORDS = {
+    "the", "and", "for", "with", "from", "that", "this", "when", "into", "which",
+    "find", "compute", "evaluate", "determine", "identify", "following", "given",
+    "what", "where", "value", "values", "point", "points", "correct", "choose",
+    "answer", "answers", "below", "using", "use", "does", "are", "is", "of", "to",
+    "let", "then", "true", "false", "equal", "equals", "equation", "function",
+}
+
+
+def _stem(word: str) -> str:
+    """A crude singular form, so `limit` matches the topic `Limits`.
+
+    Only a trailing `s` is removed, and `ies` becomes `y`. An earlier version
+    also stripped `es`, which turned `lines` into `lin` and `planes` into
+    `plan`, so the topic "Lines and planes" could never match a question about
+    lines and planes - while "Line integrals" still matched on `line` alone and
+    collected three questions that had nothing to do with line integrals.
+    """
+    if word.endswith("ies") and len(word) > 4:
+        return word[:-3] + "y"
+    if word.endswith("s") and not word.endswith("ss") and len(word) > 3:
+        return word[:-1]
+    return word
+
+
+def topic_terms(text: str) -> set[str]:
+    """The subject words of a phrase, for matching a question to a topic."""
+    return {
+        _stem(word)
+        for word in re.findall(r"[a-z]{3,}", (text or "").lower())
+        if word not in TOPIC_STOPWORDS
+    }
+
+
+def classify_topic(text: str, topics: list[str], share: float = 0.5) -> str | None:
+    """The existing topic a question belongs to, or None when nothing fits.
+
+    Exam questions must land in the course's own concept nodes rather than in a
+    node of their own. The path advances when a node's average mastery clears
+    the recall threshold, so a node holding exactly one question is completed by
+    a single lucky recall — the failure `deepen.py` was written to undo, and the
+    one a naive import recreates by naming every topic "Exam 1 Q7".
+
+    A topic matches when the question carries at least half of that topic's own
+    subject words, so "Lines and planes" needs both `line` and `plane` while a
+    seven-word topic needs four. A single shared word is not evidence:
+    on a single shared "surface", "Identify the quadric surface" - an Exam 1
+    question about recognising a shape - filed itself under "Surface integrals
+    and the big theorems", which is Exam 3 material it has nothing to do with.
+
+    Returning None is a real answer. An unclassifiable question goes to the
+    paper's own mixed-review node rather than into a topic it does not test,
+    because a wrong node is worse than a general one: it tells the learner
+    their weakness is somewhere it is not.
+    """
+    words = topic_terms(text)
+    if not words:
+        return None
+    best: tuple[int, int, str] | None = None
+    for topic in topics:
+        terms = topic_terms(topic)
+        if not terms:
+            continue
+        overlap = len(words & terms)
+        matched = overlap / len(terms)
+        if matched < share or overlap < 1:
+            continue
+        # Proportion first, so a complete hit on a two-word topic beats a
+        # partial hit on a seven-word one.
+        ranked = (matched, overlap, topic)
+        if best is None or ranked > best:
+            best = ranked
+    return best[2] if best else None

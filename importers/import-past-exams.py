@@ -292,8 +292,20 @@ def _first_question_line(lines: list[str]) -> int:
     return best
 
 
-def to_candidates(questions: list[dict], key: dict[int, str], label: str) -> list[dict]:
-    """Turn parsed questions plus the official key into savable candidates."""
+def to_candidates(
+    questions: list[dict],
+    key: dict[int, str],
+    label: str,
+    topics: list[str] | None = None,
+) -> list[dict]:
+    """Turn parsed questions plus the official key into savable candidates.
+
+    `topics` are the course's existing concept nodes. Each question is filed
+    under the one it tests, because the path advances on a node's average
+    mastery and a node holding one question is finished by a single lucky
+    recall. Naming every topic "Exam 1 Q7" recreates precisely the defect
+    `deepen.py` exists to undo.
+    """
     candidates = []
     for question in questions:
         letter = key.get(question["number"])
@@ -330,6 +342,12 @@ def to_candidates(questions: list[dict], key: dict[int, str], label: str) -> lis
         stem = stem_text
         if len(stem) < 24:
             continue
+        topic = mathpdf.classify_topic(stem_text, topics or [])
+        if topic is None:
+            # Unfiled questions would each become their own single-question
+            # node. One shared node per paper keeps them reviewable together
+            # and still needs several correct answers to clear.
+            topic = f"{label} — mixed review"
         index = letters.index(letter)
         # Mark the mathematics before storing. The reader emits LaTeX
         # fragments, and the app renders only what sits inside \( ... \), so
@@ -344,7 +362,7 @@ def to_candidates(questions: list[dict], key: dict[int, str], label: str) -> lis
             # option is correct, not why, and asserting a derivation the source
             # does not contain is exactly the failure this repo forbids.
             "explanation": f"Official Purdue answer key for {label}: {letter}.",
-            "topic": f"{label} Q{question['number']}",
+            "topic": topic,
             "kind": "recall",
             "difficulty": 3,
             # The quote is the question. Both carry the delimiters, because the
@@ -475,6 +493,18 @@ def main() -> int:
         print(f"No {args.exam} paper with a key found for {args.course}.")
         return 1
 
+    with study.connect() as db:
+        topics = [
+            row[0] for row in db.execute(
+                """SELECT DISTINCT q.topic FROM questions q
+                   JOIN materials m ON m.id = q.material_id
+                   WHERE m.campaign = ? AND q.topic NOT LIKE '%E1 %'
+                     AND q.topic NOT LIKE '%E2 %' AND q.topic NOT LIKE '%mixed review'""",
+                (campaign,),
+            )
+        ]
+    print(f"Filing against {len(topics)} existing topic(s) in {campaign}.")
+
     total = 0
     for paper in usable:
         term = paper["term"]
@@ -488,7 +518,7 @@ def main() -> int:
             print(f"  SKIP {label}: {error}")
             continue
 
-        candidates = drop_unrenderable(to_candidates(questions, key, label))
+        candidates = drop_unrenderable(to_candidates(questions, key, label, topics))
         if not candidates:
             print(f"  SKIP {label}: parsed {len(questions)} question(s), {len(key)} key entr(ies), 0 usable")
             continue
