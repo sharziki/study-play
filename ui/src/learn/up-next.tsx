@@ -28,6 +28,22 @@ const label = (item: Assessment) => {
   return numbered ? `${base} ${numbered[1]}` : base;
 };
 
+/* A scope of textbook sections reads on its own: "14.4 · 15.1". A scope of
+ * bare unit numbers does not — "1 · 2 · 3" is not obviously anything — and a
+ * scope of forty-one sections is a wall. Both get summarised. */
+const scopeLabel = (scope: string[]) => {
+  if (!scope.length) return "scope not published yet";
+  const sectioned = scope.some((part) => part.includes("."));
+  if (!sectioned) {
+    return scope.length === 1 ? `Unit ${scope[0]}` : `Units ${scope[0]}–${scope[scope.length - 1]}`;
+  }
+  if (scope.length <= 5) return scope.join(" · ");
+  const chapters = [...new Set(scope.map((part) => part.split(".")[0]))];
+  return chapters.length === 1
+    ? `Ch ${chapters[0]} · ${scope.length} sections`
+    : `Ch ${chapters[0]}–${chapters[chapters.length - 1]} · ${scope.length} sections`;
+};
+
 const when = (days: number) =>
   days <= 0 ? "today" : days === 1 ? "tomorrow" : days < 14 ? `in ${days} days` : `in ${Math.round(days / 7)} weeks`;
 
@@ -84,7 +100,7 @@ export const UpNext = ({ assessments, onStart }: Props) => {
                 </div>
 
                 <p className="mt-0.5 truncate text-xs text-ink-faint">
-                  {item.scope.length ? item.scope.join(" · ") : "scope not published yet"}
+                  {scopeLabel(item.scope)}
                 </p>
 
                 <div className="mt-2 flex items-center gap-2">
