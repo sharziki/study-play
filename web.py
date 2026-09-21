@@ -335,6 +335,36 @@ class StudyAPI:
             })
         return questions
 
+    @staticmethod
+    def _spread_over_scope(rows: list, scope: list[str], limit: int) -> list:
+        """Take from every section in turn, weakest first inside each.
+
+        Sorting the whole pool by mastery serves whichever section is weakest
+        until it runs out. That is right for general review and wrong for a
+        quiz: the quiz asks about all four of its sections on Tuesday, so an
+        evening spent entirely inside one of them leaves three untouched. The
+        learner's weakest section still comes first within each round, so the
+        ordering still follows need - it just does not monopolise the session.
+        """
+        buckets: dict[str, list] = {section: [] for section in scope}
+        for row in rows:
+            buckets.get(row["section"], buckets.setdefault(row["section"], [])).append(row)
+
+        out: list = []
+        # Rounds of one-per-section, starting with the section the learner is
+        # weakest in overall so it still leads the session.
+        order = sorted(
+            (section for section in buckets if buckets[section]),
+            key=lambda section: sum(r["mastery"] or 0.0 for r in buckets[section]) / len(buckets[section]),
+        )
+        while len(out) < limit and any(buckets[section] for section in order):
+            for section in order:
+                if len(out) >= limit:
+                    break
+                if buckets[section]:
+                    out.append(buckets[section].pop(0))
+        return out
+
     def assessments(self, campaign: str | None = None) -> dict:
         """Every upcoming quiz, midterm and final, with how ready each one is.
 
@@ -411,7 +441,7 @@ class StudyAPI:
             ))
             random.shuffle(rows)
             rows.sort(key=lambda candidate: (candidate["mastery"] or 0.0))
-            questions = self._render(db, rows[:limit])
+            questions = self._render(db, self._spread_over_scope(rows, scope, limit))
             return {
                 "questions": questions,
                 "free_run": False,

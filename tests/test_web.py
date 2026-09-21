@@ -423,3 +423,93 @@ class ClassSwitcherTest(unittest.TestCase):
 
         # An unrelated subject must still return nothing, not everything.
         self.assertFalse(self.api.session(limit=10, campaign="MA 26100", topic="zzz-nope")["questions"])
+
+
+class ExamScopeSessionTest(unittest.TestCase):
+    """Studying for one assessment must serve that assessment.
+
+    A Purdue recitation quiz is defined by its textbook sections: Quiz 4 is
+    14.4, 14.5, 15.1 and 15.2 and nothing else. Studying "MA 261" the night
+    before spends the evening on whatever is weakest across the whole course,
+    which on the wrong night is the wrong answer.
+    """
+
+    SCOPE = ["14.4", "14.5", "15.1", "15.2"]
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.temp.name) / "study.db"
+        self.api = web.StudyAPI(self.db_path)
+        with study.connect(self.db_path) as db:
+            course = db.execute(
+                "INSERT INTO courses(code,title,created_at) VALUES (?,?,?)",
+                ("MA 26100", "Multivariate", study.now().isoformat()),
+            ).lastrowid
+            material = db.execute(
+                """INSERT INTO materials(title,path,content,content_hash,created_at,campaign,course_id)
+                   VALUES (?,?,?,?,?,?,?)""",
+                ("MA 26100 guide", "memory", "content " * 40, "scope-hash",
+                 study.now().isoformat(), "MA 26100", course),
+            ).lastrowid
+            # Four in scope, plus one out of scope that must never be served.
+            # Mastery descends across the scope so the weakest section leads.
+            for index, (section, mastery) in enumerate(
+                [("14.4", 0.1), ("14.5", 0.2), ("15.1", 0.3), ("15.2", 0.4), ("17.4", 0.0)]
+            ):
+                for copy in range(3):
+                    qid = db.execute(
+                        """INSERT INTO questions
+                           (material_id,prompt,answer,explanation,topic,kind,difficulty,
+                            source_quote,choices_json,correct_choice,section,created_at)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (material, f"Q {section} {copy}", "A", "why", section, "recall", 3,
+                         "content", "[]", -1, section, study.now().isoformat()),
+                    ).lastrowid
+                    db.execute(
+                        "INSERT INTO progress(question_id,due_at,mastery) VALUES (?,?,?)",
+                        (qid, study.now().isoformat(), mastery),
+                    )
+            self.quiz = db.execute(
+                """INSERT INTO exams(course_id,title,exam_date,weight,scope_json,kind,created_at)
+                   VALUES (?,?,?,?,?,'quiz',?)""",
+                (course, "Quiz 4 (Lessons 8, 9, 10)", "2026-09-22", 1.0,
+                 json.dumps(self.SCOPE), study.now().isoformat()),
+            ).lastrowid
+            self.unscoped = db.execute(
+                """INSERT INTO exams(course_id,title,exam_date,weight,scope_json,kind,created_at)
+                   VALUES (?,?,?,?,'[]','exam',?)""",
+                (course, "Evening exam", "2026-10-05", 1.0, study.now().isoformat()),
+            ).lastrowid
+            db.commit()
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_only_questions_in_the_assessment_s_scope_are_served(self):
+        data = self.api.session(limit=12, exam=self.quiz)
+        self.assertTrue(data["questions"])
+        for question in data["questions"]:
+            self.assertIn(question["section"], self.SCOPE)
+
+    def test_the_session_spreads_over_every_section_the_quiz_covers(self):
+        """Sorting by mastery alone drains the weakest section first, leaving
+        three of the quiz's four sections untouched on the night it matters."""
+        data = self.api.session(limit=8, exam=self.quiz)
+        served = [question["section"] for question in data["questions"]]
+        self.assertEqual(set(served), set(self.SCOPE))
+        # The weakest section still leads.
+        self.assertEqual(served[0], "14.4")
+
+    def test_an_assessment_with_no_scope_serves_nothing_rather_than_everything(self):
+        """Unknown scope is not 'the whole course'. Widening silently is how a
+        learner spends their one evening revising the wrong chapter."""
+        data = self.api.session(limit=8, exam=self.unscoped)
+        self.assertEqual(data["questions"], [])
+        self.assertEqual(data["exam"]["scope"], [])
+
+    def test_readiness_is_measured_over_the_assessment_s_own_sections(self):
+        items = {item["exam_id"]: item for item in self.api.assessments()["assessments"]}
+        quiz = items[self.quiz]
+        self.assertEqual(quiz["questions"], 12)
+        # (0.1 + 0.2 + 0.3 + 0.4) / 4, the scoped mean rather than the course's.
+        self.assertAlmostEqual(quiz["readiness"], 0.25, places=6)
