@@ -276,7 +276,15 @@ class StudyAPI:
     def _topic_session(self, limit: int, campaign: str | None, topic: str) -> dict:
         """Build a concept-linked challenge set, ignoring spaced-review due dates."""
         with study.connect(self.db_path) as db:
-            params: list[object] = [topic]
+            # Topics are author-written phrases ("Direct substitution with trig",
+            # "Curvature of a plane curve"), so an exact `topic=?` match only ever
+            # fired when the caller already knew the phrase verbatim. Studying for
+            # an exam means asking for a SUBJECT -- "curvature", "arc length" --
+            # and every one of those returned zero questions while the material
+            # was sitting right there. Substring match on the topic, and on the
+            # material title so a section number like "14.5" also works.
+            needle = f"%{topic.strip().lower()}%"
+            params: list[object] = [needle, needle]
             campaign_clause = ""
             if campaign and campaign.lower() != "all":
                 campaign_clause = " AND m.campaign=?"
@@ -287,7 +295,9 @@ class StudyAPI:
                            m.title AS material_title, m.campaign
                     FROM questions q JOIN progress p ON p.question_id=q.id
                     JOIN materials m ON m.id=q.material_id
-                    WHERE q.status='ready' AND q.topic=? {campaign_clause}
+                    WHERE q.status='ready'
+                      AND (lower(q.topic) LIKE ? OR lower(m.title) LIKE ?)
+                      {campaign_clause}
                     ORDER BY CASE WHEN q.kind='transfer' THEN 0 ELSE 1 END,
                              q.difficulty DESC, p.mastery ASC, p.reviews ASC
                     LIMIT ?""",

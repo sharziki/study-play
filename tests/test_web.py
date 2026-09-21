@@ -390,3 +390,36 @@ class ClassSwitcherTest(unittest.TestCase):
             )
             db.commit()
         self.assertEqual([item["name"] for item in self.api.classes()["classes"]], [])
+
+
+    def test_topic_session_matches_subject_not_just_exact_phrase(self):
+        """Asking for "curvature" the night before a quiz returned ZERO
+        questions while matching ones sat in the bank, because the filter was
+        `q.topic=?` and real topics are phrases like "Curvature of a plane
+        curve". Found 2026-09-21, one day before MA 261 Quiz 4."""
+        with study.connect(self.db_path) as db:
+            mid = db.execute(
+                "INSERT INTO materials(title,path,content,content_hash,created_at,campaign) VALUES (?,?,?,?,?,?)",
+                ("MA 261 - 14.5 Curvature", "memory", "Curvature measures bending. " * 3,
+                 "curv-hash", study.now().isoformat(), "MA 26100"),
+            ).lastrowid
+            for topic in ("Curvature of a plane curve", "Unit tangent and normal"):
+                qid = db.execute(
+                    """INSERT INTO questions
+                       (material_id,prompt,answer,explanation,topic,kind,difficulty,source_quote,created_at)
+                       VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (mid, f"{topic}?", "A", "Why", topic, "concept", 3,
+                     "Curvature measures bending.", study.now().isoformat()),
+                ).lastrowid
+                db.execute("INSERT INTO progress(question_id,due_at) VALUES (?,?)",
+                           (qid, study.now().isoformat()))
+            db.commit()
+
+        hits = self.api.session(limit=10, campaign="MA 26100", topic="curvature")["questions"]
+        self.assertTrue(hits, "a subject search must find its questions")
+
+        # A section number matches via the material title.
+        self.assertTrue(self.api.session(limit=10, campaign="MA 26100", topic="14.5")["questions"])
+
+        # An unrelated subject must still return nothing, not everything.
+        self.assertFalse(self.api.session(limit=10, campaign="MA 26100", topic="zzz-nope")["questions"])
