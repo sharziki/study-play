@@ -26,13 +26,9 @@ import deepen  # noqa: E402  (shared busy-timeout helper)
 import lessons  # noqa: E402
 import study  # noqa: E402
 
-# A per-section material names its sections after the separator.
-MATERIAL_SECTIONS = re.compile(r"·\s*((?:1[0-9]\.\d[ab]?\s*)+)")
-
-
-def sections_of(title: str) -> list[str]:
-    found = MATERIAL_SECTIONS.search(title or "")
-    return found.group(1).split() if found else []
+# One definition, in study, so a course whose chapters are single digits is not
+# silently skipped by three tools with their own copy of the pattern.
+sections_of = study.material_sections
 
 
 def ordered_materials(db, campaign: str, exam: str | None = None) -> list:

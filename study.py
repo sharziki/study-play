@@ -935,8 +935,32 @@ def repair_math(text: str) -> str:
     return "".join(out)
 
 
-# A material imported per section names it: "MA 26100 · 14.4 14.5 Arc length".
-MATERIAL_SECTIONS = re.compile(r"·\s*((?:1[0-9]\.\d[ab]?\s*)+)")
+# A material imported per section names it after the separator:
+# "MA 26100 · 14.4 14.5 Arc length", "STAT 350 · 5.2 Joint PMFs".
+#
+# The chapter is any number, not 10-19. Written `1[0-9]` this matched MA 261's
+# chapters 12-17 and silently missed every STAT 350 section (4.x, 5.x) and
+# every CS 180 unit, leaving 1,296 questions untagged and both of those
+# courses unable to answer "what is on the exam".
+MATERIAL_SECTIONS = re.compile(r"·\s*((?:\d{1,2}\.\d[ab]?\s*)+)")
+
+# A unit numbered without a decimal: "CS 18000 · 3. Methods and Recursion".
+# Those courses have no textbook sections, so the unit number is the finest
+# division their exams can name.
+MATERIAL_UNIT = re.compile(r"·\s*(\d{1,2})\.\s+\D")
+
+
+def material_sections(title: str) -> list[str]:
+    """Every section or unit a material's title names, in order.
+
+    One list covers both shapes the courses use: decimal textbook sections
+    where a course has them, and a bare unit number where it does not.
+    """
+    found = MATERIAL_SECTIONS.search(title or "")
+    if found:
+        return found.group(1).split()
+    unit = MATERIAL_UNIT.search(title or "")
+    return [unit.group(1)] if unit else []
 
 
 def section_of(material: sqlite3.Row, question: dict) -> str:
@@ -950,10 +974,7 @@ def section_of(material: sqlite3.Row, question: dict) -> str:
     """
     keys = material.keys() if hasattr(material, "keys") else []
     title = material["title"] if "title" in keys else ""
-    found = MATERIAL_SECTIONS.search(title or "")
-    if not found:
-        return ""
-    sections = found.group(1).split()
+    sections = material_sections(title)
     return sections[0] if len(sections) == 1 else ""
 
 

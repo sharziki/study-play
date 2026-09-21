@@ -28,8 +28,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import study  # noqa: E402
 
-# A per-section material names its sections after the separator.
-MATERIAL_SECTIONS = re.compile(r"·\s*((?:1[0-9]\.\d[ab]?\s*)+)")
+# One definition, in study.
+MATERIAL_SECTIONS = study.MATERIAL_SECTIONS
 
 
 class _Titled(dict):

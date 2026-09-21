@@ -136,12 +136,19 @@ class SectionTaggingTest(unittest.TestCase):
             "",
         )
 
-    def test_a_chapter_material_has_no_section(self):
-        for title in (
-            "MA 26100 · 1. Vectors and the Geometry of Space",
-            "MA 261 - 15.2 Limits and Continuity",
-            "",
-        ):
+    def test_a_unit_numbered_material_uses_its_unit_number(self):
+        """CS 180 has no textbook sections, so the unit number is the finest
+        division its exams can name. Treating those as unsectioned left every
+        CS 180 question untagged and the course unable to answer what is on
+        the exam."""
+        self.assertEqual(
+            study.section_of(self.Row(title="CS 18000 · 3. Methods and Recursion"), {}),
+            "3",
+        )
+        self.assertEqual(study.material_sections("STAT 350 · 5.2 Joint PMFs"), ["5.2"])
+
+    def test_a_title_naming_no_section_has_none(self):
+        for title in ("MA 261 - 15.2 Limits and Continuity", "EXAMPLES", ""):
             self.assertEqual(study.section_of(self.Row(title=title), {}), "")
 
 
