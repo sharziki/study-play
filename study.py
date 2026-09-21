@@ -710,7 +710,13 @@ _DOCUMENT_META = re.compile(
     # risks" both shipped. The first attributes a method to the document rather
     # than to the subject; the second quizzes the document's own advice. Neither
     # is answerable by a learner who has only the prompt.
-    r"treats?|calls?|labels?|refers? to|distinguishes?|stated|says so)\b"
+    # "the material DEFINES", "the material MOTIVATES", "the material SHOWS".
+    # The alternation had `defines? first` and `first defines?` but not the
+    # bare verb, so a prompt that quizzes the document's own definition rather
+    # than the definition itself shipped twice in one generation run.
+    r"treats?|calls?|labels?|refers? to|distinguishes?|stated|says so|"
+    r"defines?|motivates?|shows?|explains?|derives?|gives?|provides?|"
+    r"emphasi[sz]es?|highlights?|illustrates?|describes? how)\b"
     r"|\b(?:the|these|this|your|my)\s+(?:[\w.-]+\s+){0,3}"
     r"(?:notes?|document|material|text|summary|handout|packet|unit|section|chapter|lesson)'s\b"
     r"|\b(?:in|from) (?:the|this) (?:unit|section|chapter|lesson|material|notes?)\b"

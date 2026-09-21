@@ -120,6 +120,29 @@ class SubjectNotDocumentTest(unittest.TestCase):
         ):
             self.assertFalse(study.tests_the_subject(prompt), prompt)
 
+    def test_a_question_about_the_documents_own_definition_is_rejected(self):
+        """The gate carried `defines? first` and `first defines?` but not the
+        bare verb, so a prompt quizzing the document's definition rather than
+        the definition itself shipped twice in one generation run."""
+        for prompt in (
+            "The material defines the radius of curvature as 1/kappa. What does it mean?",
+            "The material motivates arc length by chopping a curve into tiny sticks.",
+            "The unit shows that curvature is 1/a for a circle of radius a.",
+            "This section derives the formula for the unit tangent vector.",
+            "The material explains why acceleration lies in the osculating plane.",
+        ):
+            self.assertFalse(study.tests_the_subject(prompt), prompt)
+
+    def test_a_question_that_merely_contains_the_word_material_survives(self):
+        """`material` is a noun in its own right. A density problem about a
+        material scientist is a real question about the subject."""
+        for prompt in (
+            "A materials scientist proposes g(x) = kx^4 as a density. Find k.",
+            "The material of the beam has Young's modulus E. Compute the deflection.",
+            "Why does a straight line have curvature exactly 0 everywhere?",
+        ):
+            self.assertTrue(study.tests_the_subject(prompt), prompt)
+
     def test_questions_about_how_the_source_is_arranged_are_rejected(self):
         """Nine of these shipped. The gate caught "the notes say" but not
         presentation verbs, so questions about the ORDER of a document got
