@@ -53,7 +53,13 @@ def ordered_materials(db, campaign: str, exam: str | None = None) -> list:
     if exam:
         wanted = next((i for i in upcoming if i["exam_title"].lower().startswith(exam.lower())), None)
         if wanted is None:
-            raise SystemExit(f"No upcoming assessment matching {exam!r}.")
+            # Naming what exists costs one line and saves a guess.
+            choices = sorted(
+                {f"{i['course_code']}: {i['exam_title']}" for i in upcoming
+                 if i["course_code"] == campaign or not campaign}
+            )
+            listing = "\n  ".join(choices) or "(none upcoming)"
+            raise SystemExit(f"No upcoming assessment matching {exam!r}. Try:\n  {listing}")
         scope = set(wanted["scope"])
         rows = [row for row in rows if scope & set(sections_of(row["title"]))]
 
