@@ -110,8 +110,13 @@ class PathTest(unittest.TestCase):
         course tree, so the countdown is on the banner, not buried in stats."""
         banner = source("learn", "unit-banner.tsx")
         self.assertIn("daysLeft", banner)
-        self.assertIn("bg-rose-500", banner)
-        self.assertIn("bg-amber-500", banner)
+        # The urgency thresholds the scheduler uses must be visible as colour.
+        # Asserted on the tokens, not on palette classes, because the app is
+        # dark-only and a saturated slab makes its own text hard to read.
+        self.assertIn("daysLeft <= 2", banner)
+        self.assertIn("daysLeft <= 7", banner)
+        self.assertIn("wrong", banner)
+        self.assertIn("amber-400", banner)
 
 
 class SessionLoopTest(unittest.TestCase):
