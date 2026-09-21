@@ -303,24 +303,107 @@ class StudyAPI:
                     LIMIT ?""",
                 params,
             ))
-            questions = []
-            for index, row in enumerate(rows):
-                mastery = study.concept_mastery(db, row["topic"])
-                choices_data = study.multiple_choices(db, row)
-                recognition = row["kind"] != "transfer" and mastery < study.recall_threshold() and choices_data is not None
-                mode = "true_recall" if row["kind"] == "transfer" else ("recognition" if recognition else "recall")
-                questions.append({
-                    "id": row["id"], "prompt": row["prompt"], "topic": row["topic"],
-                    "kind": row["kind"], "difficulty": row["difficulty"],
-                    "material": row["material_title"], "campaign": row["campaign"],
-                    "mastery": mastery, "mode": mode,
-                    "choices": choices_data[0] if recognition and choices_data else [],
-                    "boss": index == 0, "target_seconds": 25 + row["difficulty"] * 10,
-                })
+            questions = self._render(db, rows)
             return {"questions": questions, "free_run": False, "campaign": campaign or "All", "topic": topic}
 
-    def session(self, limit: int = 12, campaign: str | None = None, topic: str | None = None) -> dict:
+    def _render(self, db, rows) -> list[dict]:
+        """One question payload per row, with its retrieval mode decided.
+
+        Recognition gives the options; recall takes them away. A concept the
+        learner has not yet built cannot be retrieved cold, and a concept they
+        have should not keep being offered four choices.
+        """
+        questions = []
+        for index, row in enumerate(rows):
+            mastery = study.concept_mastery(db, row["topic"])
+            choices_data = study.multiple_choices(db, row)
+            recognition = (
+                row["kind"] != "transfer"
+                and mastery < study.recall_threshold()
+                and choices_data is not None
+            )
+            mode = "true_recall" if row["kind"] == "transfer" else ("recognition" if recognition else "recall")
+            keys = row.keys()
+            questions.append({
+                "id": row["id"], "prompt": row["prompt"], "topic": row["topic"],
+                "kind": row["kind"], "difficulty": row["difficulty"],
+                "material": row["material_title"], "campaign": row["campaign"],
+                "section": row["section"] if "section" in keys else "",
+                "mastery": mastery, "mode": mode,
+                "choices": choices_data[0] if recognition and choices_data else [],
+                "boss": index == 0, "target_seconds": 25 + row["difficulty"] * 10,
+            })
+        return questions
+
+    def _exam_session(self, limit: int, exam: str | int) -> dict:
+        """A session drawn only from one assessment's own sections.
+
+        A Purdue recitation quiz is defined by sections: Quiz 4 is 14.4, 14.5,
+        15.1 and 15.2 and nothing else. Studying "MA 261" the night before it
+        spends that evening on whatever the queue thinks is weakest across the
+        whole course, which on the wrong night is the wrong answer. This serves
+        the quiz.
+
+        Weakest-first inside the scope, because the scope is already the
+        filter; within it there is no reason to review what is solid.
+        """
+        with study.connect(self.db_path) as db:
+            row = db.execute(
+                """SELECT e.id, e.title, e.exam_date, e.kind, e.scope_json, c.code
+                   FROM exams e JOIN courses c ON c.id = e.course_id WHERE e.id=?""",
+                (int(exam),),
+            ).fetchone()
+            if row is None:
+                return {"questions": [], "free_run": False, "campaign": "All", "exam": None}
+            try:
+                scope = json.loads(row["scope_json"] or "[]")
+            except json.JSONDecodeError:
+                scope = []
+            if not scope:
+                # No scope recorded is not "everything"; it is unknown, and
+                # silently widening to the whole course is how a learner ends
+                # up revising Chapter 17 for a Chapter 15 quiz.
+                return {
+                    "questions": [], "free_run": False, "campaign": row["code"],
+                    "exam": {"id": row["id"], "title": row["title"], "scope": []},
+                }
+            placeholders = ",".join("?" * len(scope))
+            rows = list(db.execute(
+                f"""SELECT q.*, p.interval_days, p.reviews, p.lapses, p.mastery, p.due_at,
+                           m.title AS material_title, m.campaign, m.course_id
+                    FROM questions q JOIN progress p ON p.question_id=q.id
+                    JOIN materials m ON m.id=q.material_id
+                    WHERE q.status='ready' AND q.section IN ({placeholders})
+                      AND m.campaign=?
+                    ORDER BY p.mastery ASC, p.lapses DESC, p.reviews ASC LIMIT ?""",
+                [*scope, row["code"], max(limit * 3, 30)],
+            ))
+            random.shuffle(rows)
+            rows.sort(key=lambda candidate: (candidate["mastery"] or 0.0))
+            questions = self._render(db, rows[:limit])
+            return {
+                "questions": questions,
+                "free_run": False,
+                "campaign": row["code"],
+                "exam": {
+                    "id": row["id"],
+                    "title": row["title"],
+                    "kind": row["kind"],
+                    "exam_date": row["exam_date"],
+                    "scope": scope,
+                },
+            }
+
+    def session(
+        self,
+        limit: int = 12,
+        campaign: str | None = None,
+        topic: str | None = None,
+        exam: str | int | None = None,
+    ) -> dict:
         limit = max(1, min(40, int(limit)))
+        if exam:
+            return self._exam_session(limit, exam)
         if topic:
             return self._topic_session(limit, campaign, topic)
         with study.connect(self.db_path) as db:
@@ -527,6 +610,12 @@ class StudyAPI:
                     "course": pressure.get("course_code", row["campaign"]),
                     "days_left": pressure.get("days_left"),
                     "exam_title": pressure.get("exam_title"),
+                    "exam_kind": pressure.get("kind"),
+                    # Every upcoming assessment, not just the most urgent one.
+                    # A course with a quiz tomorrow and a midterm in two weeks
+                    # is preparing for both, and showing only the quiz hides
+                    # the midterm until it is too late to have revised for it.
+                    "upcoming": pressure.get("upcoming", []),
                     "nodes": [],
                 }
                 by_material[row["material_id"]] = unit
@@ -884,7 +973,8 @@ class Handler(BaseHTTPRequestHandler):
                 limit = int(query.get("limit", ["12"])[0])
                 campaign = query.get("campaign", [None])[0]
                 topic = query.get("topic", [None])[0]
-                self._json(self.api.session(limit, campaign, topic))
+                exam = query.get("exam", [None])[0]
+                self._json(self.api.session(limit, campaign, topic, exam))
                 return
             if parsed.path == "/api/lesson":
                 query = parse_qs(parsed.query)

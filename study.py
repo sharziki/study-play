@@ -143,7 +143,7 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
           id INTEGER PRIMARY KEY, material_id INTEGER NOT NULL REFERENCES materials(id),
           prompt TEXT NOT NULL, answer TEXT NOT NULL, explanation TEXT NOT NULL,
           topic TEXT NOT NULL, difficulty INTEGER NOT NULL, source_quote TEXT NOT NULL,
-          kind TEXT NOT NULL DEFAULT 'recall',
+          kind TEXT NOT NULL DEFAULT 'recall', section TEXT NOT NULL DEFAULT '',
           choices_json TEXT NOT NULL DEFAULT '[]', correct_choice INTEGER NOT NULL DEFAULT -1,
           status TEXT NOT NULL DEFAULT 'ready', created_at TEXT NOT NULL,
           UNIQUE(material_id, prompt)
@@ -199,6 +199,7 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
           id INTEGER PRIMARY KEY, course_id INTEGER NOT NULL REFERENCES courses(id),
           title TEXT NOT NULL, exam_date TEXT NOT NULL,
           weight REAL NOT NULL DEFAULT 1.0, scope_json TEXT NOT NULL DEFAULT '[]',
+          kind TEXT NOT NULL DEFAULT 'exam',
           created_at TEXT NOT NULL, UNIQUE(course_id, title)
         );
         INSERT OR IGNORE INTO profile(id) VALUES (1);
@@ -224,6 +225,12 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
         db.execute("ALTER TABLE questions ADD COLUMN correct_choice INTEGER NOT NULL DEFAULT -1")
     if "kind" not in question_columns:
         db.execute("ALTER TABLE questions ADD COLUMN kind TEXT NOT NULL DEFAULT 'recall'")
+    if "section" not in question_columns:
+        # A quiz is scoped by textbook section, not by concept name. Without
+        # this the app can say "Quiz 4 is tomorrow" but cannot serve the four
+        # sections Quiz 4 actually covers.
+        db.execute("ALTER TABLE questions ADD COLUMN section TEXT NOT NULL DEFAULT ''")
+        db.execute("CREATE INDEX IF NOT EXISTS questions_section ON questions(section)")
     if "mastery" not in progress_columns:
         db.execute("ALTER TABLE progress ADD COLUMN mastery REAL NOT NULL DEFAULT 0")
     if "stability" not in progress_columns:
@@ -244,6 +251,17 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
         db.execute("ALTER TABLE profile ADD COLUMN last_study_date TEXT")
     if "course_id" not in material_columns:
         db.execute("ALTER TABLE materials ADD COLUMN course_id INTEGER REFERENCES courses(id)")
+    if "section" not in question_columns:
+        # Which textbook section a question examines, e.g. "14.4". A quiz is
+        # defined by its sections, not by our concept names, so without this
+        # the app cannot answer "what is on Tuesday's quiz".
+        db.execute("ALTER TABLE questions ADD COLUMN section TEXT NOT NULL DEFAULT ''")
+    exam_columns = {row[1] for row in db.execute("PRAGMA table_info(exams)")}
+    if "kind" not in exam_columns:
+        db.execute("ALTER TABLE exams ADD COLUMN kind TEXT NOT NULL DEFAULT 'exam'")
+        # Existing rows carry their kind in the title the sync wrote.
+        db.execute("UPDATE exams SET kind='quiz' WHERE title LIKE 'Quiz%'")
+        db.execute("UPDATE exams SET kind='final' WHERE title LIKE 'Final%'")
     db.commit()
     return db
 
@@ -285,32 +303,59 @@ def exam_pressure(days_left: int, weight: float = 1.0) -> float:
     return 1.0 + weight * (EXAM_HORIZON_DAYS - days_left) / 3.0
 
 
-def course_pressures(db: sqlite3.Connection, today: date | None = None) -> dict[int, dict]:
-    """Highest-pressure upcoming exam per course, keyed by course id."""
+def upcoming_assessments(db: sqlite3.Connection, today: date | None = None) -> dict[int, list[dict]]:
+    """Every future assessment per course, soonest first.
+
+    A course is not preparing for one thing. MA 261 has a recitation quiz
+    tomorrow covering four named lessons AND a midterm two weeks out covering
+    sixteen, and those are different pieces of work: the quiz is narrow and
+    imminent, the midterm is broad and still worth starting. Collapsing them to
+    whichever is nearest hides the midterm entirely until the quiz has passed,
+    which is exactly when it is too late to have been revising for it.
+    """
     reference = today or _today()
-    pressures: dict[int, dict] = {}
+    by_course: dict[int, list[dict]] = {}
     for row in db.execute(
-        """SELECT e.id, e.course_id, e.title, e.exam_date, e.weight, c.code, c.title AS course_title
+        """SELECT e.id, e.course_id, e.title, e.exam_date, e.weight, e.kind, e.scope_json,
+                  c.code, c.title AS course_title
            FROM exams e JOIN courses c ON c.id = e.course_id
-           WHERE c.archived = 0"""
+           WHERE c.archived = 0
+           ORDER BY e.exam_date"""
     ):
         days_left = days_until(row["exam_date"], reference)
         if days_left < 0:
             continue
-        pressure = exam_pressure(days_left, row["weight"])
-        current = pressures.get(row["course_id"])
-        if current is None or pressure > current["pressure"]:
-            pressures[row["course_id"]] = {
-                "exam_id": row["id"],
-                "course_id": row["course_id"],
-                "course_code": row["code"],
-                "course_title": row["course_title"],
-                "exam_title": row["title"],
-                "exam_date": row["exam_date"],
-                "weight": row["weight"],
-                "days_left": days_left,
-                "pressure": pressure,
-            }
+        try:
+            scope = json.loads(row["scope_json"] or "[]")
+        except json.JSONDecodeError:
+            scope = []
+        by_course.setdefault(row["course_id"], []).append({
+            "exam_id": row["id"],
+            "course_id": row["course_id"],
+            "course_code": row["code"],
+            "course_title": row["course_title"],
+            "exam_title": row["title"],
+            "exam_date": row["exam_date"],
+            "kind": row["kind"] or "exam",
+            "scope": scope,
+            "weight": row["weight"],
+            "days_left": days_left,
+            "pressure": exam_pressure(days_left, row["weight"]),
+        })
+    return by_course
+
+
+def course_pressures(db: sqlite3.Connection, today: date | None = None) -> dict[int, dict]:
+    """Highest-pressure upcoming assessment per course, keyed by course id.
+
+    This is what orders the queue: one number per course. The full list lives in
+    `upcoming_assessments`, because the learner needs to see both the quiz and
+    the midterm even though only the most urgent one can steer the ordering.
+    """
+    pressures: dict[int, dict] = {}
+    for course_id, items in upcoming_assessments(db, today).items():
+        best = max(items, key=lambda item: item["pressure"])
+        pressures[course_id] = {**best, "upcoming": items}
     return pressures
 
 
