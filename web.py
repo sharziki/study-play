@@ -136,12 +136,20 @@ class StudyAPI:
                 "materials": recent,
             }
 
-    def lesson_session(self, campaign: str | None = None) -> dict:
-        """Return the next first-principles lesson without leaking check answers."""
+    def lesson_session(self, campaign: str | None = None, lesson_id: int | None = None) -> dict:
+        """Return one first-principles lesson without leaking check answers.
+
+        A specific `lesson_id` is what a path node asks for, because tapping a
+        node has to teach THAT node rather than whatever is next in the queue.
+        Without it the learner taps curvature and is taught limits.
+        """
         with study.connect(self.db_path) as db:
             params: list[object] = []
             campaign_clause = ""
-            if campaign and campaign.lower() != "all":
+            if lesson_id:
+                campaign_clause = "WHERE l.id=?"
+                params.append(int(lesson_id))
+            elif campaign and campaign.lower() != "all":
                 campaign_clause = "WHERE m.campaign=?"
                 params.append(campaign)
             row = db.execute(
@@ -1087,7 +1095,8 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/lesson":
                 query = parse_qs(parsed.query)
                 campaign = query.get("campaign", [None])[0]
-                self._json(self.api.lesson_session(campaign))
+                requested = query.get("lesson_id", [None])[0]
+                self._json(self.api.lesson_session(campaign, int(requested) if requested else None))
                 return
             if parsed.path == "/api/courses":
                 self._json(self.api.courses())

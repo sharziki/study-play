@@ -13,9 +13,10 @@ const mascotSad = "/assets/mascot_sad.svg";
 
 type LearnProps = {
   onStart: (params: { campaign?: string; topic?: string }) => void;
+  onTeach: (lessonId: number) => void;
 };
 
-export const Learn = ({ onStart }: LearnProps) => {
+export const Learn = ({ onStart, onTeach }: LearnProps) => {
   const campaign = usePlayer((state) => state.campaign);
   const [units, setUnits] = useState<PathUnit[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +85,14 @@ export const Learn = ({ onStart }: LearnProps) => {
                 onClick={() => {
                   if (node.state === "locked") {
                     toast("Finish the node above first.");
+                    return;
+                  }
+                  // Teach before testing. Unsupported retrieval on a concept
+                  // the learner has not met is not a hard question, it is a
+                  // guess, and the product rule is that a node with a lesson
+                  // and no reviews opens that lesson first.
+                  if (node.lesson_id && node.reviews === 0) {
+                    onTeach(node.lesson_id);
                     return;
                   }
                   onStart({ campaign: unit.campaign, topic: node.topic });

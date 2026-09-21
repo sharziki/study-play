@@ -6,6 +6,7 @@ import { StatsRail } from "@/components/stats-rail";
 import { Button } from "@/components/ui/button";
 import { Learn } from "@/learn/learn";
 import { UpNext } from "@/learn/up-next";
+import { LessonView } from "@/lesson/lesson-view";
 import { Quiz } from "@/lesson/quiz";
 import { api, type Assessment, type ClassSummary, type Dashboard, type Question } from "@/lib/api";
 import { usePlayer } from "@/store/player";
@@ -19,6 +20,7 @@ export const App = () => {
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [session, setSession] = useState<Question[] | null>(null);
   const [starting, setStarting] = useState(false);
+  const [teaching, setTeaching] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -78,8 +80,18 @@ export const App = () => {
 
   const exit = useCallback(() => {
     setSession(null);
+    setTeaching(null);
     void refresh();
   }, [refresh]);
+
+  if (teaching !== null) {
+    return (
+      <div className="flex h-[100dvh] flex-col">
+        <LessonView lessonId={teaching} campaign={campaign || undefined} onExit={exit} />
+        <Toaster position="top-center" />
+      </div>
+    );
+  }
 
   if (session) {
     return (
@@ -100,7 +112,7 @@ export const App = () => {
           <div className="pt-4 lg:hidden">
             <UpNext assessments={assessments} onStart={(item) => void start({ exam: item.exam_id })} />
           </div>
-          <Learn onStart={start} />
+          <Learn onStart={start} onTeach={setTeaching} />
         </div>
         <aside className="hidden w-[320px] shrink-0 lg:block">
           <StatsRail

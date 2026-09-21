@@ -12,7 +12,7 @@
 /* Bumped automatically by the build (see ui/scripts/stamp-sw.mjs).
  * Hand-editing this was a real source of "I shipped a fix and the phone kept
  * showing the old screen", twice in one session. */
-const VERSION = "intellect-477aa666e62d";
+const VERSION = "intellect-69915899b26d";
 const SHELL_CACHE = `${VERSION}-shell`;
 const DATA_CACHE = `${VERSION}-data`;
 

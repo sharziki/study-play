@@ -847,6 +847,14 @@ def _latex_body(body: str) -> str:
     return body.replace("→", r"\to ").replace("−", "-").strip()
 
 
+# `\\(...\\)` where `\(...\)` was meant. The whole pair must be present, because
+# a doubled backslash is also LaTeX's line break: `\\ (x+1)` inside an aligned
+# block is a row break followed by a parenthesis, and rewriting that would
+# corrupt real mathematics to fix a delimiter that was never there.
+_DOUBLED_DELIMITER = re.compile(r"\\\\\((.*?)\\\\\)", re.S)
+_DOUBLED_DISPLAY = re.compile(r"\\\\\[(.*?)\\\\\]", re.S)
+
+
 def repair_math(text: str) -> str:
     """Wrap plaintext maths that would otherwise render as literal characters.
 
@@ -862,6 +870,13 @@ def repair_math(text: str) -> str:
     """
     if not text:
         return text
+
+    # A doubled backslash before a delimiter is LaTeX's line break followed by
+    # a parenthesis, not inline math, so KaTeX leaves it alone and the learner
+    # reads "\\(t\\)" as literal characters. The model emits this despite the
+    # prompt, and it reached 125 of 148 lessons before a screenshot caught it.
+    text = _DOUBLED_DELIMITER.sub(lambda m: f"\\({m.group(1)}\\)", text)
+    text = _DOUBLED_DISPLAY.sub(lambda m: f"\\[{m.group(1)}\\]", text)
 
     def fix(segment: str) -> str:
         done: list[str] = []

@@ -55,6 +55,38 @@ export type Assessment = {
   questions: number;
 };
 
+export type LessonCheck = { prompt: string; choices: string[] };
+
+export type Lesson = {
+  available: boolean;
+  id: number;
+  topic: string;
+  title: string;
+  objective: string;
+  motivation: string;
+  prerequisites: string[];
+  primitives: { term: string; meaning: string }[];
+  derivation_steps: { title: string; claim: string; reason: string }[];
+  worked_example: { problem: string; steps: { action: string; why?: string }[]; answer?: string };
+  misconception: string;
+  checks: LessonCheck[];
+  source_quote: string;
+  material: string;
+  campaign: string;
+  stage: "teach" | "check" | "challenge" | "complete";
+  current_check: number;
+};
+
+export type CheckResult = {
+  correct: boolean;
+  correct_choice: number;
+  explanation: string;
+  xp_gained: number;
+  stage: string;
+  current_check: number;
+  ready_for_challenge: boolean;
+};
+
 export type Profile = {
   xp: number;
   combo: number;
@@ -162,6 +194,12 @@ export const api = {
   classes: () => request<{ classes: ClassSummary[] }>("/api/classes"),
 
   path: (campaign?: string) => request<{ units: PathUnit[] }>(query("/api/path", { campaign })),
+
+  lesson: (campaign?: string, lessonId?: number) =>
+    request<Lesson>(query("/api/lesson", { campaign, lesson_id: lessonId })),
+
+  lessonCheck: (payload: { lesson_id: number; check_index: number; selected_choice: number }) =>
+    request<CheckResult>("/api/lesson-check", { method: "POST", body: JSON.stringify(payload) }),
 
   assessments: (campaign?: string) =>
     request<{ assessments: Assessment[] }>(query("/api/assessments", { campaign })),
