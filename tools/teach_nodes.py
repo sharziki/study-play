@@ -51,12 +51,25 @@ def ordered_materials(db, campaign: str, exam: str | None = None) -> list:
     rows = db.execute("SELECT * FROM materials WHERE campaign=? ORDER BY id", (campaign,)).fetchall()
 
     if exam:
-        wanted = next((i for i in upcoming if i["exam_title"].lower().startswith(exam.lower())), None)
+        # Match within the requested class. Without this, `--exam "Exam 1"`
+        # took whichever course's Exam 1 came first, so asking for STAT 350's
+        # matched CS 180's, intersected its unit scope against STAT 350's
+        # section titles, found nothing, and reported "No material" for a
+        # course holding 1,296 questions.
+        wanted = next(
+            (
+                item
+                for item in upcoming
+                if item["course_code"] == campaign
+                and item["exam_title"].lower().startswith(exam.lower())
+            ),
+            None,
+        )
         if wanted is None:
             # Naming what exists costs one line and saves a guess.
             choices = sorted(
                 {f"{i['course_code']}: {i['exam_title']}" for i in upcoming
-                 if i["course_code"] == campaign or not campaign}
+                 if i["course_code"] == campaign}
             )
             listing = "\n  ".join(choices) or "(none upcoming)"
             raise SystemExit(f"No upcoming assessment matching {exam!r}. Try:\n  {listing}")

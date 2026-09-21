@@ -513,3 +513,52 @@ class ExamScopeSessionTest(unittest.TestCase):
         self.assertEqual(quiz["questions"], 12)
         # (0.1 + 0.2 + 0.3 + 0.4) / 4, the scoped mean rather than the course's.
         self.assertAlmostEqual(quiz["readiness"], 0.25, places=6)
+
+
+class AssessmentLookupTest(unittest.TestCase):
+    """An assessment named on the command line must be this course's.
+
+    Two courses both call their first exam "Exam 1". Matching on title alone
+    took whichever came first, so asking for STAT 350's matched CS 180's,
+    intersected CS 180's unit numbers against STAT 350's section numbers,
+    found nothing, and reported "No material" for a course holding 1,296
+    questions. A wrong match here reads as an empty course.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.temp.name) / "study.db"
+        with study.connect(self.db_path) as db:
+            for code, title, scope in (
+                ("CS 18000", "Exam 1 (Units 1-3)", ["1", "2", "3"]),
+                ("STAT 350", "Exam 1 (Chapters 1-8)", ["1.1", "4.4"]),
+            ):
+                course = db.execute(
+                    "INSERT INTO courses(code,title,created_at) VALUES (?,?,?)",
+                    (code, code, study.now().isoformat()),
+                ).lastrowid
+                db.execute(
+                    """INSERT INTO exams(course_id,title,exam_date,weight,scope_json,kind,created_at)
+                       VALUES (?,?,?,?,?,'exam',?)""",
+                    (course, title, "2026-12-01", 1.0, json.dumps(scope), study.now().isoformat()),
+                )
+            db.commit()
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_each_course_resolves_its_own_exam_1(self):
+        with study.connect(self.db_path) as db:
+            by_code = {
+                item["course_code"]: item
+                for items in study.upcoming_assessments(db).values()
+                for item in items
+                if item["exam_title"].startswith("Exam 1")
+            }
+        self.assertEqual(by_code["CS 18000"]["scope"], ["1", "2", "3"])
+        self.assertEqual(by_code["STAT 350"]["scope"], ["1.1", "4.4"])
+        # The two scopes share no section, which is exactly why a cross-course
+        # match produced an empty intersection rather than an error.
+        self.assertEqual(
+            set(by_code["CS 18000"]["scope"]) & set(by_code["STAT 350"]["scope"]), set()
+        )
