@@ -279,7 +279,7 @@ def ascii_math_offenders(lesson: dict, limit: int = 8) -> list[str]:
     return offenders
 
 
-def call_model(prompt: str, timeout: int = 300) -> dict:
+def call_model(prompt: str, timeout: int = 600) -> dict:
     if not shutil.which("claude"):
         raise RuntimeError("claude CLI not found")
     result = subprocess.run(

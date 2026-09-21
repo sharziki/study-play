@@ -143,8 +143,13 @@ MATERIAL:
 """
 
 
-def call_model(prompt: str, timeout: int = 300) -> list[dict]:
-    """One structured generation call, using the same contract as `study`."""
+def call_model(prompt: str, timeout: int = 600) -> list[dict]:
+    """One structured generation call, using the same contract as `study`.
+
+    The timeout is generous because the runners shard and run in parallel: under
+    a dozen concurrent workers a call that normally takes 40 seconds can take
+    several minutes, and a timeout throws away the whole batch.
+    """
     if not shutil.which("claude"):
         raise RuntimeError("claude CLI not found")
     result = subprocess.run(
