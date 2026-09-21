@@ -1166,7 +1166,15 @@ def _has_courses(db: sqlite3.Connection) -> bool:
     return bool(db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='courses'").fetchone())
 
 
-def generate(material_id: int | None, count: int) -> None:
+def generate(material_id: int | None, count: int, focus: str | None = None) -> None:
+    """Generate questions for one material, optionally aimed at one section.
+
+    A material can teach two of the course's sections - arc length and
+    curvature are written together - and generation follows the material's own
+    emphasis, which is curvature. Six calls in a row produced curvature
+    questions while 14.4 stayed two short of what its quiz needs, so the
+    caller has to be able to name the half it is short of.
+    """
     with connect() as db:
         if material_id:
             materials = db.execute("SELECT * FROM materials WHERE id=?", (material_id,)).fetchall()
@@ -1175,6 +1183,12 @@ def generate(material_id: int | None, count: int) -> None:
         if not materials:
             raise SystemExit("No material. Run: ./study import notes.md")
         history = generation_context(db)
+        if focus:
+            history += (
+                f"\n\nGENERATE ONLY FOR SECTION {focus}. The material covers more than "
+                f"that section; every question must examine {focus} specifically, and a "
+                "question about a neighbouring section is not wanted however good it is."
+            )
         total = 0
         for material in materials:
             print(f"Generating from {material['title']}…", flush=True)
@@ -2155,6 +2169,7 @@ def parser() -> argparse.ArgumentParser:
     gen = sub.add_parser("generate", help="generate grounded questions with Claude")
     gen.add_argument("--material", type=int)
     gen.add_argument("--count", type=int, default=10)
+    gen.add_argument("--focus", help="only this textbook section, e.g. 14.4")
     run = sub.add_parser("play", help="start a recall run")
     run.add_argument("--limit", type=int, default=15)
     sub.add_parser("stats")
@@ -2173,7 +2188,7 @@ def main() -> None:
         if command == "import":
             import_material(args.path, not args.no_background)
         elif command == "generate":
-            generate(args.material, args.count)
+            generate(args.material, args.count, args.focus)
         elif command == "play":
             play(args.limit)
         elif command == "stats":

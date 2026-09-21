@@ -88,7 +88,7 @@ def main() -> int:
         return 0
 
     print(f"{row['title']} — {len(gaps)} section(s) under {args.target}:")
-    planned: dict[int, int] = {}
+    planned: list[tuple[int, str, int]] = []
     for section, have in gaps:
         materials = teaches.get(section)
         if not materials:
@@ -96,19 +96,23 @@ def main() -> int:
             continue
         need = args.target - have
         print(f"  {section:6} {have:3} → need {need:2}  via {titles[materials[0]][:46]}")
-        # A material teaching two sections is asked once for the larger need,
-        # since one generation call spans whatever the material covers.
-        planned[materials[0]] = max(planned.get(materials[0], 0), need)
+        # A material teaching two sections needs one call PER section, aimed
+        # at the section that is short. Asking once for the pair follows the
+        # material's own emphasis and tops up whichever half was already
+        # fuller: six calls produced curvature questions while arc length
+        # stayed two short of what its quiz needs.
+        planned.append((materials[0], section, need))
 
     if args.dry_run or not planned:
         return 0
 
-    items = list(planned.items())[: args.limit] if args.limit else list(planned.items())
-    for material_id, need in items:
-        print(f"\n→ {titles[material_id][:60]} (+{need})")
+    items = planned[: args.limit] if args.limit else planned
+    for material_id, section, need in items:
+        print(f"\n→ {section}  {titles[material_id][:52]} (+{need})")
         result = subprocess.run(
             [sys.executable, str(ROOT / "study.py"), "generate",
-             "--material", str(material_id), "--count", str(need + 4)],
+             "--material", str(material_id), "--count", str(need + 4),
+             "--focus", section],
             capture_output=True, text=True, timeout=1800,
         )
         print("  " + (result.stdout.strip().splitlines() or ["no output"])[-1])
