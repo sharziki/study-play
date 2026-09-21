@@ -1,4 +1,4 @@
-import { Check, Crown, Star } from "lucide-react";
+import { BookOpen, Check, Crown, Star } from "lucide-react";
 import { CircularProgressbarWithChildren } from "react-circular-progressbar";
 
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,11 @@ type LessonButtonProps = {
   current?: boolean;
   percentage: number;
   label: string;
+  /* Whether tapping this node teaches rather than tests. A node the learner
+     has never attempted and that has a lesson opens the lesson, and the icon
+     has to say so: otherwise a tap is a coin flip between reading and being
+     asked something they have not been taught. */
+  teaches?: boolean;
   onClick: () => void;
 };
 
@@ -23,6 +28,7 @@ export const LessonButton = ({
   current,
   percentage,
   label,
+  teaches,
   onClick,
 }: LessonButtonProps) => {
   // The snaking trail: nodes drift right, then back left, on an 8-node cycle.
@@ -35,7 +41,7 @@ export const LessonButton = ({
   const isFirst = index === 0;
   const isLast = index === totalCount - 1;
   const isCompleted = !current && !locked;
-  const Icon = isCompleted ? Check : isLast ? Crown : Star;
+  const Icon = isCompleted ? Check : teaches ? BookOpen : isLast ? Crown : Star;
 
   return (
     <button
@@ -58,7 +64,7 @@ export const LessonButton = ({
         {current ? (
           <div className="relative h-[102px] w-[102px]">
             <div className="lift absolute -top-6 left-2.5 z-10 animate-bounce rounded-xl border border-line bg-surface-raised px-3 py-2.5 text-sm font-bold uppercase tracking-wide text-correct">
-              Start
+              {teaches ? "Learn" : "Start"}
               <div
                 className="absolute -bottom-2 left-1/2 h-0 w-0 -translate-x-1/2 transform border-x-8 border-t-8 border-x-transparent border-t-line"
                 aria-hidden

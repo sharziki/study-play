@@ -81,7 +81,12 @@ export const Learn = ({ onStart, onTeach }: LearnProps) => {
                 locked={node.state === "locked"}
                 current={node.state === "current"}
                 percentage={Math.round(node.mastery * 100)}
-                label={`${node.topic} · ${Math.round(node.mastery * 100)}% mastered`}
+                teaches={!!node.lesson_id && node.reviews === 0}
+                label={
+                  node.lesson_id && node.reviews === 0
+                    ? `${node.topic} · lesson`
+                    : `${node.topic} · ${Math.round(node.mastery * 100)}% mastered`
+                }
                 onClick={() => {
                   if (node.state === "locked") {
                     toast("Finish the node above first.");
