@@ -28,6 +28,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import study  # noqa: E402
 
+# A per-section material names its sections after the separator.
+MATERIAL_SECTIONS = re.compile(r"·\s*((?:1[0-9]\.\d[ab]?\s*)+)")
+
 
 class _Titled(dict):
     """A row shaped the way `study.section_of` expects."""
@@ -96,8 +99,15 @@ TOPIC_SECTIONS = {
     "lines and planes": "13.5",
     "vector-valued functions": "14.1",
     "tangents and motion": "14.3",
-    # The bank's own node covers both halves; the prompt decides which.
+    # These nodes cover both halves; the prompt decides which.
     "arc length and curvature": None,
+    "curvature formulas": "14.5",
+    "curvature intuition": "14.5",
+    "radius of curvature": "14.5",
+    "arc length computation": "14.4",
+    "arc length concept": "14.4",
+    "reparametrization by arc length": "14.4",
+    "reparameterization by arc length": "14.4",
     "functions of several variables": "15.1",
     "limits": "15.2",
     "continuity": "15.2",
@@ -175,6 +185,16 @@ def main() -> int:
                 section = owned
             else:
                 section = classify(row["prompt"], row["topic"])
+            if section is None:
+                # A material teaching two sections cannot say which half a
+                # question tests, but it can say the question is in one of
+                # them. Falling back to the first is better than leaving the
+                # question untagged and therefore invisible to quiz scope:
+                # seven arc-length and curvature questions sat outside Quiz 4
+                # entirely because their topic names were not in the map.
+                owned_pair = MATERIAL_SECTIONS.search(row["material_title"] or "")
+                if owned_pair:
+                    section = owned_pair.group(1).split()[0]
             if section is None:
                 unplaced.append(f"{row['topic']} :: {row['prompt'][:70]}")
                 continue
