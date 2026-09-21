@@ -145,6 +145,13 @@ class ExamParsingTest(unittest.TestCase):
         for candidate in self.candidates:
             self.assertEqual(candidate["source_quote"], candidate["prompt"])
 
+    def test_every_prompt_marks_its_mathematics_for_rendering(self):
+        """Undelimited LaTeX reaches the learner as literal braces."""
+        marked = [c for c in self.candidates if "^{" in c["prompt"] or "\\frac" in c["prompt"]]
+        self.assertTrue(marked)
+        for candidate in marked:
+            self.assertIn("\\(", candidate["prompt"])
+
     def test_no_candidate_carries_unreconstructed_mathematics(self):
         for candidate in self.candidates:
             self.assertTrue(mathpdf.is_faithful(candidate["prompt"]), candidate["prompt"])

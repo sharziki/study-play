@@ -476,7 +476,16 @@ UNRECONSTRUCTED = re.compile(
         # always set as a fraction, so a bare pair outside one means the stack
         # was not recovered and the operator has lost its variable.
         r"\u2202(?![^{}]*\}\{)",
-        # Private-use glyphs from a maths font's extensible delimiters.
+        # Angle brackets that came out as letters. Some papers set vectors with
+        # a font whose delimiters extract as `h` and `i`, so `⟨3 cos t, 2 sin t⟩`
+        # reads `h3 cos t, 2 sin ti`. It looks like a typo and is in fact the
+        # vector's brackets, which cannot be told apart from real variables
+        # named h and i without guessing.
+        # `h` bound straight onto a number or sign, with a matching `i` closing
+        # a comma list. In prose `h` is always a separate word; glued to a digit
+        # it is a delimiter the font failed to export.
+        r"(?<![A-Za-z])h(?=[-+\u2212\d~\\])[^,]{0,60}(?:,[^,]{0,60}){1,3}i(?![A-Za-z])",
+        # Private-file glyphs from a maths font's extensible delimiters.
         r"[\ue000-\uf8ff\x00-\x08\x0e-\x1f]",
     ])
 )
@@ -501,3 +510,258 @@ def is_faithful(text: str) -> bool:
 def radical_count(text: str) -> int:
     """How many radicals a piece of text contains, reconstructed or not."""
     return text.count(RADICAL_SIGN) + text.count("\\sqrt{")
+
+
+# Characters a KaTeX expression cannot carry as literal text. Combining marks
+# from vector arrows and similar decorations break it, so a run holding one is
+# left as plain text rather than wrapped into an expression that fails.
+UNWRAPPABLE = re.compile(r"[\u0300-\u036f\u20d0-\u20f0]")
+
+# A token that cannot occur in ordinary prose and therefore anchors a run of
+# mathematics. Without an anchor nothing is wrapped at all.
+# Unicode operators and Greek letters the app also expects inside delimiters.
+# KaTeX renders them, and the repo's own bank check treats one loose in prose
+# as unrepaired markup, so they anchor a run exactly as `\frac` does.
+UNICODE_MATH = "\u22c3\u22c2\u222a\u2229\u2208\u2209\u2286\u2282\u2287\u2264\u2265\u2260\u2248\u00b1\u221e\u2211\u220f\u222b\u221a\u00b7\u00d7\u00f7\u2190\u2192\u21d2\u21d4\u2200\u2203\u2205\u2202\u2207"
+GREEK = "\u03b1\u03b2\u03b3\u03b4\u03b5\u03b6\u03b7\u03b8\u03b9\u03ba\u03bb\u03bc\u03bd\u03be\u03c0\u03c1\u03c3\u03c4\u03c5\u03c6\u03c7\u03c8\u03c9\u0393\u0394\u0398\u039b\u039e\u03a0\u03a3\u03a6\u03a8\u03a9"
+SUBSCRIPTS = "\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089"
+
+# Script and blackboard letters these papers use as ordinary variables: the
+# script ell of a line, the real numbers R, the partial-derivative d. They
+# extend a run but do not anchor one, because a lone symbol is not an
+# expression.
+SYMBOL_LETTERS = "\u2113\u211d\u2102\u2115\u2124\u211a\u2118\u2111\u211c"
+
+ANCHOR = re.compile(
+    r"\\(?:frac|sqrt|lim)\b|\^\{|_\{|[" + UNICODE_MATH + GREEK + SUBSCRIPTS + "]"
+)
+
+# Characters that may extend a run outward from its anchor. Deliberately
+# excludes the comma and full stop, which end sentences far more often than
+# they appear mid-expression at a run's edge.
+EXTEND = set(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    "()[]|+-*/=<>^_{}\\ \u2212\u27e8\u27e9"
+) | set(UNICODE_MATH) | set(GREEK) | set(SUBSCRIPTS) | set(SYMBOL_LETTERS)
+
+
+def _token_spans(text: str) -> list[tuple[int, int]]:
+    """Every brace group and command in `text`, as spans that must stay whole.
+
+    Splitting a run inside `\\frac{a}{b}` produces `\\(\\frac{a\\)}{\\(b\\)}`,
+    which renders as nothing and reads as garbage. The first version of this
+    did exactly that, which is why the scan is structural rather than a regex.
+    """
+    spans: list[tuple[int, int]] = []
+    index = 0
+    while index < len(text):
+        if text[index] == "{":
+            depth = 0
+            start = index
+            while index < len(text):
+                if text[index] == "{":
+                    depth += 1
+                elif text[index] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        spans.append((start, index + 1))
+                        break
+                index += 1
+        index += 1
+    return spans
+
+
+# An English word adjacent to an expression is prose, not part of it. Two or
+# more letters in a row that form a real word end the run; single letters and
+# known function names are mathematics.
+FUNCTION_NAMES = {"sin", "cos", "tan", "ln", "log", "exp", "lim", "max", "min", "det"}
+WORD = re.compile(r"[A-Za-z]+")
+
+
+def _is_prose_word(word: str) -> bool:
+    return len(word) > 1 and word.lower() not in FUNCTION_NAMES
+
+
+# Angle brackets delimit a vector on these papers exactly as parentheses
+# delimit an argument list, so a comma inside one is a separator, not
+# punctuation. Leaving them out split every vector at its first comma.
+OPENERS = "([\u27e8"
+CLOSERS = ")]\u27e9"
+
+
+def _inside_brackets(text: str, position: int) -> bool:
+    """Whether `position` sits between an unclosed bracket and its partner."""
+    depth = 0
+    for index in range(position, -1, -1):
+        if text[index] in CLOSERS:
+            depth += 1
+        elif text[index] in OPENERS:
+            if depth == 0:
+                break
+            depth -= 1
+    else:
+        return False
+    depth = 0
+    for index in range(position, len(text)):
+        if text[index] in OPENERS:
+            depth += 1
+        elif text[index] in CLOSERS:
+            if depth == 0:
+                return True
+            depth -= 1
+    return False
+
+
+def _extend_left(text: str, anchor: int) -> int:
+    """How far left of the anchor the expression reaches, stopping at prose.
+
+    Walks outward one token at a time rather than running to the edge and
+    retreating. The retreating version was subtly wrong in both directions at
+    once: it left `f (x,` outside the expression while pulling `the traces of`
+    inside it.
+    """
+    position = anchor
+    while position > 0:
+        cursor = position
+        while cursor > 0 and text[cursor - 1] in " \t":
+            cursor -= 1
+        if cursor == 0:
+            return cursor
+        previous = text[cursor - 1]
+        # A Greek letter is a symbol, not a word, even though it is alphabetic.
+        # Treated as a word it ends the run, which split every vector holding a
+        # pi at exactly that pi.
+        if previous in GREEK or previous in SYMBOL_LETTERS:
+            position = cursor - 1
+            continue
+        if previous.isalpha():
+            word_start = cursor - 1
+            while word_start > 0 and text[word_start - 1].isalpha():
+                word_start -= 1
+            # A LaTeX command is one token with its backslash. Splitting
+            # `\\frac` between the slash and the name produces `\\(...\\)frac`,
+            # which renders the command name as literal prose.
+            if word_start > 0 and text[word_start - 1] == "\\":
+                position = word_start - 1
+                continue
+            if _is_prose_word(text[word_start:cursor]):
+                return position
+            position = word_start
+            continue
+        if previous in EXTEND:
+            position = cursor - 1
+            continue
+        # A comma inside brackets is an argument separator, not punctuation.
+        # `f (x, y) = ...` otherwise splits as `f (x,` prose and `y) = ...`
+        # mathematics, which is neither.
+        if previous == "," and _inside_brackets(text, cursor - 1):
+            position = cursor - 1
+            continue
+        return position
+    return position
+
+
+def _extend_right(text: str, anchor: int) -> int:
+    """How far right of the anchor the expression reaches, stopping at prose."""
+    position = anchor
+    while position < len(text):
+        cursor = position
+        while cursor < len(text) and text[cursor] in " \t":
+            cursor += 1
+        if cursor >= len(text):
+            return position
+        nxt = text[cursor]
+        if nxt == "\\":
+            word_end = cursor + 1
+            while word_end < len(text) and text[word_end].isalpha():
+                word_end += 1
+            position = word_end
+            continue
+        if nxt in GREEK or nxt in SYMBOL_LETTERS:
+            position = cursor + 1
+            continue
+        if nxt.isalpha():
+            word_end = cursor
+            while word_end < len(text) and text[word_end].isalpha():
+                word_end += 1
+            if _is_prose_word(text[cursor:word_end]):
+                return position
+            position = word_end
+            continue
+        if nxt in EXTEND:
+            position = cursor + 1
+            continue
+        if nxt == "," and _inside_brackets(text, cursor):
+            position = cursor + 1
+            continue
+        return position
+    return position
+
+
+def _protected(position: int, spans: list[tuple[int, int]]) -> tuple[int, int] | None:
+    for start, end in spans:
+        if start < position < end:
+            return start, end
+    return None
+
+
+def wrap_math(text: str) -> str:
+    """Delimit reconstructed mathematics so the app renders it.
+
+    The reader emits LaTeX fragments - `x^{2}`, `\\frac{a}{b}` - but the app
+    renders only what sits inside `\\( ... \\)`. Undelimited, the learner reads
+    the markup itself: literal braces on the page.
+
+    The wrap is deliberately timid. `repair_math` in study.py carries a warning
+    earned the hard way: an earlier attempt to detect whole mathematical runs
+    produced `\\(two-path\\)` and `\\(n^{2} for\\)`, because prose and notation
+    share every line. So a run is only wrapped when anchored by a token that
+    cannot appear in prose, and it never ends inside a brace group.
+    """
+    if not text or "\\(" in text:
+        return text
+
+    spans = _token_spans(text)
+    anchors = [match.start() for match in ANCHOR.finditer(text)]
+    if not anchors:
+        return text
+
+    runs: list[tuple[int, int]] = []
+    for anchor in anchors:
+        if runs and runs[-1][0] <= anchor < runs[-1][1]:
+            continue
+        start = _extend_left(text, anchor)
+        end = _extend_right(text, anchor)
+        # A run must not stop inside a brace group, or the group is cut in half.
+        for bound, extend_to in ((start, 0), (end, 1)):
+            group = _protected(bound, spans)
+            if group:
+                start, end = min(start, group[0]), max(end, group[1])
+        # ...and extending may have reached a new group, so settle.
+        changed = True
+        while changed:
+            changed = False
+            for group_start, group_end in spans:
+                if group_start < start < group_end or group_start < end < group_end:
+                    start, end = min(start, group_start), max(end, group_end)
+                    changed = True
+        if runs and start <= runs[-1][1]:
+            runs[-1] = (runs[-1][0], max(runs[-1][1], end))
+        else:
+            runs.append((start, end))
+
+    out = []
+    cursor = 0
+    for start, end in runs:
+        fragment = text[start:end]
+        stripped = fragment.strip()
+        out.append(text[cursor:start])
+        if stripped and not UNWRAPPABLE.search(stripped):
+            leading = fragment[: len(fragment) - len(fragment.lstrip())]
+            trailing = fragment[len(fragment.rstrip()):]
+            out.append(f"{leading}\\({stripped}\\){trailing}")
+        else:
+            out.append(fragment)
+        cursor = end
+    out.append(text[cursor:])
+    return "".join(out)

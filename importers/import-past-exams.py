@@ -331,6 +331,11 @@ def to_candidates(questions: list[dict], key: dict[int, str], label: str) -> lis
         if len(stem) < 24:
             continue
         index = letters.index(letter)
+        # Mark the mathematics before storing. The reader emits LaTeX
+        # fragments, and the app renders only what sits inside \( ... \), so
+        # an unmarked question shows the learner literal braces.
+        stem = mathpdf.wrap_math(stem)
+        bodies = [mathpdf.wrap_math(body) for body in bodies]
         candidates.append({
             "number": question["number"],
             "prompt": stem,
@@ -342,6 +347,10 @@ def to_candidates(questions: list[dict], key: dict[int, str], label: str) -> lis
             "topic": f"{label} Q{question['number']}",
             "kind": "recall",
             "difficulty": 3,
+            # The quote is the question. Both carry the delimiters, because the
+            # material stores exactly what the learner is shown; a quote in a
+            # different notation from the material fails the grounding check
+            # that every stored question must pass.
             "source_quote": stem,
             "choices": bodies,
             "correct_choice": index,
@@ -365,6 +374,51 @@ TRUNCATED_STEM = re.compile(
 def is_missing_its_expression(stem: str) -> bool:
     """Whether a stem refers to mathematics that is not present in it."""
     return bool(TRUNCATED_STEM.search(stem))
+
+
+MATH_SPAN = re.compile(r"\\\\\((.+?)\\\\\)", re.S)
+KATEX = Path(__file__).resolve().parents[1] / "tools" / "katex_validate.js"
+
+
+def katex_failures(candidates: list[dict]) -> set[str]:
+    """Every delimited expression the app's own KaTeX build cannot render.
+
+    "The reader produced LaTeX" and "the learner sees mathematics" are
+    different claims, and only the second one matters. This checks the second
+    with the exact KaTeX the app ships, so a question that would render as a
+    red error string never reaches the bank.
+    """
+    expressions = sorted({
+        expression
+        for candidate in candidates
+        for field in (candidate["prompt"], *candidate["choices"])
+        for expression in MATH_SPAN.findall(field)
+    })
+    if not expressions:
+        return set()
+    result = subprocess.run(
+        ["node", str(KATEX)], input=json.dumps(expressions), capture_output=True, text=True, timeout=120
+    )
+    if result.returncode == 0:
+        return set()
+    try:
+        return {failure["expression"] for failure in json.loads(result.stdout or "[]")}
+    except json.JSONDecodeError:
+        # The validator itself failed. Refusing everything is the safe reading.
+        return set(expressions)
+
+
+def drop_unrenderable(candidates: list[dict]) -> list[dict]:
+    broken = katex_failures(candidates)
+    if not broken:
+        return candidates
+    kept = []
+    for candidate in candidates:
+        fields = (candidate["prompt"], *candidate["choices"])
+        if any(expression in broken for field in fields for expression in MATH_SPAN.findall(field)):
+            continue
+        kept.append(candidate)
+    return kept
 
 
 def build_material(label: str, candidates: list[dict], url: str) -> str:
@@ -434,7 +488,7 @@ def main() -> int:
             print(f"  SKIP {label}: {error}")
             continue
 
-        candidates = to_candidates(questions, key, label)
+        candidates = drop_unrenderable(to_candidates(questions, key, label))
         if not candidates:
             print(f"  SKIP {label}: parsed {len(questions)} question(s), {len(key)} key entr(ies), 0 usable")
             continue
