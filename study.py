@@ -615,6 +615,12 @@ formatting advice inside the material is context for how to ask, not a subject
 to be quizzed on.
 
 {kind_rule}
+CODE IS WRITTEN AS CODE. Wrap every identifier, keyword, literal, operator and
+snippet in single backticks: `int`, `&&`, `switch`, `s.length()`,
+`for (int i = 0; i < n; i++)`. Prose is not code and must stay outside them.
+An identifier left bare reads as an English word, so "why & can throw where &&
+would not" becomes a sentence about ampersands rather than about operators.
+
 MATHEMATICS IS WRITTEN AS MATHEMATICS. Every mathematical expression in every
 field — prompt, answer, explanation, and choices — must be LaTeX inside \\( ... \\)
 for inline math or \\[ ... \\] for display math. Write \\(n^2\\), never "n²" or "n^2".

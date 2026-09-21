@@ -144,6 +144,12 @@ SELF-CONTAINED. Never refer to a numbered exercise, page, or section, and never
 mention the notes, the document, or how the material is arranged. The learner
 sees the lesson alone and never sees the source.
 
+CODE IS WRITTEN AS CODE. Wrap every identifier, keyword, literal, operator and
+snippet in single backticks: `int`, `&&`, `switch`, `s.length()`,
+`for (int i = 0; i < n; i++)`. Prose is not code and must stay outside them.
+An identifier left bare reads as an English word, so "why & can throw where &&
+would not" becomes a sentence about ampersands rather than about operators.
+
 MATHEMATICS IS WRITTEN AS MATHEMATICS. Every mathematical expression in every
 field must be LaTeX inside \\( ... \\) for inline math or \\[ ... \\] for display math.
 Write \\(n^2\\), never "n²" or "n^2". Write \\(\\bar{{x}}\\), \\(\\sigma^2\\), \\(\\mu\\),
