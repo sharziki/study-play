@@ -137,6 +137,24 @@ class SubjectNotDocumentTest(unittest.TestCase):
         ):
             self.assertFalse(study.tests_the_subject(prompt), prompt)
 
+    def test_attributing_a_method_to_the_source_is_rejected(self):
+        """Two shapes survived the earlier patterns and reached the live bank.
+
+        "The material uses a 'next value' test" attributes a method to the
+        document rather than to the subject, so a learner who understands the
+        test still cannot answer it. "The material's stated real risks" quizzes
+        the document's own study advice, which is context for how to ask a
+        question, not a thing to be examined on.
+        """
+        for prompt in (
+            "The material uses a 'next value' test to distinguish discrete from continuous.",
+            "Given that the sign of y is the material's stated real risk, what is the best use of time?",
+            "The notes call this the interquartile range. Why?",
+            "The unit refers to these as resistant measures.",
+            "What does this section label a lurking variable?",
+        ):
+            self.assertFalse(study.tests_the_subject(prompt), prompt)
+
     def test_subject_questions_survive_incidental_vocabulary(self):
         """'material', 'text', and 'notes' are ordinary words in real problems."""
         for prompt in (
@@ -145,6 +163,12 @@ class SubjectNotDocumentTest(unittest.TestCase):
             "Which text is continuous at the origin?",
             "The function notes a discontinuity at the origin. Why?",
             "Per the chain rule, what is the derivative?",
+            # The verbs added for the cases above are ordinary English. A real
+            # question may use any of them about a person or an object.
+            "A material scientist uses a next-value test on heart rate. Why is it continuous?",
+            "An engineer labels the axis in volts. What changes?",
+            "Which distribution applies when trials are independent?",
+            "The sensor refers to a fixed origin. Why does that matter?",
         ):
             self.assertTrue(study.tests_the_subject(prompt), prompt)
 

@@ -109,3 +109,32 @@ class BankRendersTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DocumentQuestionSweepTest(unittest.TestCase):
+    """The live bank must satisfy the guard that now governs new questions.
+
+    tests_the_subject was tightened twice after the first imports, so questions
+    written under the older rule kept being served. tools/bury_document_questions.py
+    sweeps them; this is the check that it was run.
+    """
+
+    def test_no_served_question_examines_the_document(self):
+        import study
+
+        offenders = [
+            (qid, text[:70])
+            for qid, field, text in bank_fields()
+            if field == "prompt" and not study.tests_the_subject(text)
+        ]
+        self.assertEqual(offenders, [], f"run tools/bury_document_questions.py: {offenders[:3]}")
+
+    def test_no_served_question_needs_the_source_in_hand(self):
+        import study
+
+        offenders = [
+            (qid, text[:70])
+            for qid, field, text in bank_fields()
+            if field == "prompt" and not study.is_self_contained(text)
+        ]
+        self.assertEqual(offenders, [], f"unanswerable without the source: {offenders[:3]}")
