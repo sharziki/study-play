@@ -537,20 +537,34 @@ def claude_questions(
     count: int,
     transfer_only: bool = False,
     known_topics: list[str] | None = None,
+    focus: str | None = None,
 ) -> list[dict]:
     if not shutil.which("claude"):
         raise RuntimeError("claude CLI not found")
     content = material["content"][:60000]
     topics = material_topics(content)
-    coverage_rule = (
-        "COVERAGE (most important): the material covers these sections:\n"
-        + "\n".join(f"  - {topic}" for topic in topics)
-        + "\nEvery section must be represented before any section gets a second question. "
-          "Do not concentrate on whichever idea the material discusses at greatest length.\n"
-        if topics else
-        "COVERAGE (most important): span every distinct idea in the material before "
-        "revisiting any one of them.\n"
-    )
+    if focus:
+        # The coverage rule is titled "most important" and names every section
+        # the material teaches, so on a two-section material it out-argues a
+        # focus buried in the learner context: six runs asked for 14.4 and
+        # produced curvature. When a section is named, coverage IS that
+        # section.
+        coverage_rule = (
+            f"COVERAGE (most important): generate ONLY questions that examine section "
+            f"{focus}. This material also covers other sections; a question about any "
+            f"of them is rejected however good it is. Span the distinct ideas WITHIN "
+            f"{focus} before revisiting any one of them.\n"
+        )
+    else:
+        coverage_rule = (
+            "COVERAGE (most important): the material covers these sections:\n"
+            + "\n".join(f"  - {topic}" for topic in topics)
+            + "\nEvery section must be represented before any section gets a second question. "
+              "Do not concentrate on whichever idea the material discusses at greatest length.\n"
+            if topics else
+            "COVERAGE (most important): span every distinct idea in the material before "
+            "revisiting any one of them.\n"
+        )
     reuse_rule = (
         "\nTOPIC NAMES ARE NODES, NOT LABELS. These topics already exist for this\n"
         "material:\n"
@@ -1198,7 +1212,9 @@ def generate(material_id: int | None, count: int, focus: str | None = None) -> N
             for index, batch_size in enumerate(batches, 1):
                 if len(batches) > 1:
                     print(f"Batch {index}/{len(batches)}: requesting {batch_size} questions…", flush=True)
-                questions.extend(claude_questions(material, history, batch_size, known_topics=known))
+                questions.extend(claude_questions(
+                    material, history, batch_size, known_topics=known, focus=focus
+                ))
                 # Later batches see what the earlier ones chose, so a name
                 # invented in batch one becomes the node batch two adds to.
                 known = sorted({*known, *(q.get("topic", "").strip() for q in questions if q.get("topic"))})
