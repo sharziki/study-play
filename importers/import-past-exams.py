@@ -192,6 +192,13 @@ def parse_questions(lines: list[str]) -> list[dict]:
     current: dict | None = None
     collecting_stem = False
 
+    # The cover page carries its own numbered list - the exam policies, "1.
+    # Students may not open the exam until instructed to do so." Read from the
+    # top, that list claims numbers 1 through 6 before a single question
+    # appears, and the real question 1 is then rejected as out of sequence.
+    # Spring 2025's Exam 2 lost ten of its twelve questions that way.
+    lines = lines[_first_question_line(lines):]
+
     for line in lines:
         option = OPTION.match(line)
         start = QUESTION_START.match(line)
@@ -264,6 +271,25 @@ def _continues_option(existing: str, line: str) -> bool:
         return False
     # An option that already ends in a full stop is complete.
     return not existing.rstrip().endswith(".")
+
+
+# The policy list is prose instructions; a question is a task. The policy list
+# also always precedes the questions, so the last numbered "1." wins.
+POLICY_WORDS = re.compile(
+    r"\b(?:students?|proctors?|TAs?|lecturers?|exam room|writing instruments|"
+    r"academic dishonesty|Dean of Students)\b",
+    re.IGNORECASE,
+)
+
+
+def _first_question_line(lines: list[str]) -> int:
+    """Where the real questions begin, past any numbered policy list."""
+    best = 0
+    for index, line in enumerate(lines):
+        match = QUESTION_START.match(line)
+        if match and match.group(1) == "1" and not POLICY_WORDS.search(line):
+            best = index
+    return best
 
 
 def to_candidates(questions: list[dict], key: dict[int, str], label: str) -> list[dict]:
