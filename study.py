@@ -250,6 +250,12 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
 
 EXAM_HORIZON_DAYS = 21
 
+# A question may carry between four and six options. Generation always asks for
+# four; six is what a real Purdue mathematics exam offers (A through F), and an
+# imported past paper keeps its own option count rather than being trimmed.
+MIN_CHOICES = 4
+MAX_CHOICES = 6
+
 # How far the queue may look past the most urgent question to avoid repeating a
 # topic. Small enough that interleaving never outranks exam pressure.
 INTERLEAVE_WINDOW = 4
@@ -832,9 +838,15 @@ def save_questions(db: sqlite3.Connection, material: sqlite3.Row, questions: lis
         choices = [repair_math(choice) for choice in choices]
         answer = repair_math(q["answer"]).strip()
         prompt_text = q.get("prompt", "")
+        # Generation asks for exactly four choices, but a real Purdue exam paper
+        # offers six (A-F). Accepting a range lets an authentic past exam be
+        # imported verbatim with its official key instead of being reshaped into
+        # a four-option approximation of itself.
         if (
-            not generation_quality_ok(material["content"], quote, answer) or len(choices) != 4
-            or len(set(choices)) != 4 or correct_choice not in range(4)
+            not generation_quality_ok(material["content"], quote, answer)
+            or not MIN_CHOICES <= len(choices) <= MAX_CHOICES
+            or len(set(choices)) != len(choices)
+            or correct_choice not in range(len(choices))
             or choices[correct_choice] != answer
             or not is_self_contained(prompt_text)
             or not tests_the_subject(prompt_text)
@@ -1581,7 +1593,7 @@ def prompt_answer() -> str | None:
 
 def multiple_choices(db: sqlite3.Connection, q: sqlite3.Row) -> tuple[list[str], int] | None:
     stored = json.loads(q["choices_json"] or "[]")
-    if len(stored) == 4 and q["correct_choice"] in range(4):
+    if MIN_CHOICES <= len(stored) <= MAX_CHOICES and q["correct_choice"] in range(len(stored)):
         return stored, q["correct_choice"]
     distractors = [
         row[0] for row in db.execute(

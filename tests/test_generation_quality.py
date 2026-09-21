@@ -310,6 +310,58 @@ class SaveGateTest(unittest.TestCase):
             self.assertEqual(saved, 1)
 
 
+    def _save(self, choices, correct_choice):
+        with study.connect(self.db_path) as db:
+            digest = f"hash-{len(choices)}-{correct_choice}-{choices[1][:8]}"
+            material_id = db.execute(
+                "INSERT INTO materials(title,path,content,content_hash,created_at) VALUES (?,?,?,?,?)",
+                ("Quiz prep", "memory", MATERIAL, digest, study.now().isoformat()),
+            ).lastrowid
+            db.commit()
+            material = db.execute("SELECT * FROM materials WHERE id=?", (material_id,)).fetchone()
+            candidate = self._candidate("Why is cancelling the common factor valid here?")
+            candidate["choices"] = choices
+            candidate["correct_choice"] = correct_choice
+            return study.save_questions(db, material, [candidate])
+
+    def test_a_six_option_question_is_kept(self):
+        """Purdue mathematics exams offer A through F. A real past paper has to
+        import with its own option count, or it is not that paper any more."""
+        answer = "Because the expressions agree except at the point itself."
+        self.assertEqual(self._save([
+            answer,
+            "Because limits ignore denominators.",
+            "Because 0/0 equals 1.",
+            "Because substitution always works.",
+            "Because the denominator is never zero.",
+            "The limit does not exist.",
+        ], 0), 1)
+
+    def test_too_few_and_too_many_options_are_both_rejected(self):
+        answer = "Because the expressions agree except at the point itself."
+        extras = [
+            "Because limits ignore denominators.",
+            "Because 0/0 equals 1.",
+            "Because substitution always works.",
+            "Because the denominator is never zero.",
+            "The limit does not exist.",
+            "Because the function is continuous.",
+        ]
+        self.assertEqual(self._save([answer, *extras[:2]], 0), 0)
+        self.assertEqual(self._save([answer, *extras], 0), 0)
+
+    def test_a_duplicated_option_is_still_rejected_at_six(self):
+        answer = "Because the expressions agree except at the point itself."
+        self.assertEqual(self._save([
+            answer,
+            "Because limits ignore denominators.",
+            "Because limits ignore denominators.",
+            "Because substitution always works.",
+            "Because the denominator is never zero.",
+            "The limit does not exist.",
+        ], 0), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
 
