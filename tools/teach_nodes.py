@@ -15,6 +15,7 @@ nothing after it.
 """
 
 import argparse
+import re
 import sys
 import time
 from pathlib import Path
@@ -25,20 +26,55 @@ import deepen  # noqa: E402  (shared busy-timeout helper)
 import lessons  # noqa: E402
 import study  # noqa: E402
 
+# A per-section material names its sections after the separator.
+MATERIAL_SECTIONS = re.compile(r"·\s*((?:1[0-9]\.\d[ab]?\s*)+)")
 
-def ordered_materials(db, campaign: str) -> list:
-    """Materials for a class, soonest exam first.
 
-    The same ordering the learning path uses, so the units being taught are the
-    units at the top of the learner's screen.
+def sections_of(title: str) -> list[str]:
+    found = MATERIAL_SECTIONS.search(title or "")
+    return found.group(1).split() if found else []
+
+
+def ordered_materials(db, campaign: str, exam: str | None = None) -> list:
+    """Materials for a class, soonest assessment first.
+
+    Ordering by the COURSE's next exam puts every material in a class on the
+    same footing, because they all share that one date. With a quiz tomorrow
+    over four sections and forty-eight materials in the class, that ordering
+    is no ordering at all: it taught whatever came first by id while fourteen
+    nodes on tomorrow's quiz stayed untaught.
+
+    Each material is now ranked by the soonest assessment that actually covers
+    a section it teaches, so the quiz's own units come first.
     """
-    pressures = study.course_pressures(db)
+    upcoming = [
+        item
+        for items in study.upcoming_assessments(db).values()
+        for item in items
+    ]
     rows = db.execute("SELECT * FROM materials WHERE campaign=? ORDER BY id", (campaign,)).fetchall()
 
+    if exam:
+        wanted = next((i for i in upcoming if i["exam_title"].lower().startswith(exam.lower())), None)
+        if wanted is None:
+            raise SystemExit(f"No upcoming assessment matching {exam!r}.")
+        scope = set(wanted["scope"])
+        rows = [row for row in rows if scope & set(sections_of(row["title"]))]
+
     def key(row):
-        pressure = pressures.get(row["course_id"]) or {}
+        sections = set(sections_of(row["title"]))
+        covering = [
+            item["days_left"]
+            for item in upcoming
+            if item["course_id"] == row["course_id"] and sections & set(item["scope"] or [])
+        ]
+        if covering:
+            return (0, min(covering), row["id"])
+        # No assessment names this material's sections, or it has none. It
+        # still belongs to the class, just behind everything being examined.
+        pressure = study.course_pressures(db).get(row["course_id"]) or {}
         days = pressure.get("days_left")
-        return (days is None, days if days is not None else 0, row["id"])
+        return (1, days if days is not None else 10**6, row["id"])
 
     return sorted(rows, key=key)
 
@@ -52,10 +88,11 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--shard", type=int, default=0, help="this worker's index")
     parser.add_argument("--shards", type=int, default=1, help="how many workers are running")
+    parser.add_argument("--exam", help='only units an assessment covers, e.g. "Quiz 4"')
     args = parser.parse_args()
 
     db = deepen.share(study.connect())
-    materials = ordered_materials(db, args.campaign)
+    materials = ordered_materials(db, args.campaign, args.exam)
     if not materials:
         print(f"No material for {args.campaign!r}.")
         return 1
