@@ -20,7 +20,7 @@ export const ResultCard = ({ value, variant }: ResultCardProps) => {
     >
       <div
         className={cn(
-          "rounded-t-xl p-1.5 text-center text-xs font-bold uppercase text-white",
+          "rounded-t-xl p-1.5 text-center text-xs font-bold uppercase text-ink",
           variant === "points" && "bg-orange-400",
           variant === "hearts" && "bg-rose-500",
           variant === "accuracy" && "bg-sky-500"
@@ -31,7 +31,7 @@ export const ResultCard = ({ value, variant }: ResultCardProps) => {
 
       <div
         className={cn(
-          "flex items-center justify-center rounded-2xl bg-white p-6 text-lg font-bold",
+          "flex items-center justify-center rounded-2xl bg-surface p-6 text-lg font-bold",
           variant === "points" && "text-orange-400",
           variant === "hearts" && "text-rose-500",
           variant === "accuracy" && "text-sky-500"

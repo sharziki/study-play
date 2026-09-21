@@ -335,6 +335,37 @@ class StudyAPI:
             })
         return questions
 
+    def assessments(self, campaign: str | None = None) -> dict:
+        """Every upcoming quiz, midterm and final, with how ready each one is.
+
+        Readiness is mastery over that assessment's own sections, not over the
+        course. Those are different numbers and only the first one answers
+        "am I ready for Tuesday".
+        """
+        with study.connect(self.db_path) as db:
+            items = []
+            for course_id, upcoming in study.upcoming_assessments(db).items():
+                for item in upcoming:
+                    if campaign and campaign.lower() != "all" and item["course_code"] != campaign:
+                        continue
+                    scope = item["scope"]
+                    ready, covered = 0.0, 0
+                    if scope:
+                        placeholders = ",".join("?" * len(scope))
+                        row = db.execute(
+                            f"""SELECT COALESCE(AVG(p.mastery), 0) AS mastery, COUNT(q.id) AS n
+                                FROM questions q
+                                JOIN progress p ON p.question_id = q.id
+                                JOIN materials m ON m.id = q.material_id
+                                WHERE q.status='ready' AND q.section IN ({placeholders})
+                                  AND m.course_id = ?""",
+                            [*scope, course_id],
+                        ).fetchone()
+                        ready, covered = float(row["mastery"] or 0), row["n"]
+                    items.append({**item, "readiness": ready, "questions": covered})
+            items.sort(key=lambda item: item["exam_date"])
+            return {"assessments": items}
+
     def _exam_session(self, limit: int, exam: str | int) -> dict:
         """A session drawn only from one assessment's own sections.
 
@@ -578,6 +609,7 @@ class StudyAPI:
             rows = list(db.execute(
                 f"""SELECT m.id AS material_id, m.title AS material_title, m.campaign,
                            m.course_id, q.topic,
+                           GROUP_CONCAT(DISTINCT q.section) AS sections,
                            COUNT(q.id) AS questions,
                            AVG(p.mastery) AS mastery,
                            SUM(CASE WHEN p.due_at<=? THEN 1 ELSE 0 END) AS due,
@@ -597,12 +629,22 @@ class StudyAPI:
                 for row in db.execute("SELECT id, material_id, topic FROM lessons")
             }
 
+        # Which sections each unit actually teaches, so a unit is only labelled
+        # with an assessment that covers it.
+        unit_sections: dict[int, set[str]] = {}
+        for row in rows:
+            found = {s for s in (row["sections"] or "").split(",") if s}
+            unit_sections.setdefault(row["material_id"], set()).update(found)
+
         units: list[dict] = []
         by_material: dict[int, dict] = {}
         for row in rows:
             unit = by_material.get(row["material_id"])
             if unit is None:
-                pressure = pressures.get(row["course_id"]) or {}
+                pressure = self._unit_pressure(
+                    pressures.get(row["course_id"]),
+                    unit_sections.get(row["material_id"], set()),
+                )
                 unit = {
                     "material_id": row["material_id"],
                     "title": row["material_title"],
@@ -657,6 +699,38 @@ class StudyAPI:
             unit["progress"] = done / total
             unit["complete"] = done == total
         return {"units": units, "campaign": campaign or "All"}
+
+    @staticmethod
+    def _unit_pressure(pressure: dict | None, sections: set[str]) -> dict:
+        """The soonest assessment that actually covers this unit.
+
+        The course's nearest exam is not every unit's nearest exam. Labelling
+        all of them with it put "Quiz 4 · tomorrow" on Vector Calculus, which
+        that quiz does not touch — so every banner turned red and the label
+        stopped carrying information. A unit whose sections no upcoming
+        assessment covers gets no countdown at all, which is the truth.
+        """
+        if not pressure:
+            return {}
+        upcoming = sorted(pressure.get("upcoming", []), key=lambda item: item["days_left"])
+
+        # Scope only narrows the label when there is scope on both sides to
+        # compare. A course whose assessments publish no sections, or a unit
+        # whose questions are not yet section-tagged, keeps the old behaviour
+        # of naming the course's nearest exam: less precise, but a countdown
+        # that exists beats one that silently disappears.
+        known = [item for item in upcoming if item.get("scope")]
+        if not known or not sections:
+            return pressure
+
+        for item in known:
+            if set(item["scope"]) & sections:
+                return item
+
+        # Every upcoming assessment publishes its scope and none covers this
+        # unit, so there is genuinely nothing to count down to here. Keep the
+        # course code so the unit still names its class.
+        return {"course_code": pressure.get("course_code")}
 
     def _courses(self) -> dict:
         """Every active course with its next exam, countdown, and readiness."""
@@ -975,6 +1049,10 @@ class Handler(BaseHTTPRequestHandler):
                 topic = query.get("topic", [None])[0]
                 exam = query.get("exam", [None])[0]
                 self._json(self.api.session(limit, campaign, topic, exam))
+                return
+            if parsed.path == "/api/assessments":
+                query = parse_qs(parsed.query)
+                self._json(self.api.assessments(query.get("campaign", [None])[0]))
                 return
             if parsed.path == "/api/lesson":
                 query = parse_qs(parsed.query)

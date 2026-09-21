@@ -18,21 +18,21 @@ export const Footer = ({ onCheck, status, disabled, checkLabel }: FooterProps) =
   return (
     <footer
       className={cn(
-        "h-[100px] border-t-2 pb-[env(safe-area-inset-bottom)] lg:h-[140px]",
-        status === "correct" && "border-transparent bg-green-100",
-        status === "wrong" && "border-transparent bg-rose-100"
+        "h-[100px] border-t-2 border-line pb-[env(safe-area-inset-bottom)] lg:h-[140px]",
+        status === "correct" && "border-correct/40 bg-correct/10",
+        status === "wrong" && "border-wrong/40 bg-wrong/10"
       )}
     >
       <div className="mx-auto flex h-full max-w-[1140px] items-center justify-between px-6 lg:px-10">
         {status === "correct" && (
-          <div className="flex items-center text-base font-bold text-green-500 lg:text-2xl">
+          <div className="flex items-center text-base font-bold text-correct lg:text-2xl">
             <CheckCircle className="mr-4 h-6 w-6 lg:h-10 lg:w-10" />
             Nicely done!
           </div>
         )}
 
         {status === "wrong" && (
-          <div className="flex items-center text-base font-bold text-rose-500 lg:text-2xl">
+          <div className="flex items-center text-base font-bold text-wrong lg:text-2xl">
             <XCircle className="mr-4 h-6 w-6 lg:h-10 lg:w-10" />
             Not quite.
           </div>

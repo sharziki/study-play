@@ -10,36 +10,38 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
+        /* On a dark canvas a filled button carries dark ink, because the fill
+           is the bright surface. Inverting that gives light-on-light, which
+           reads as a disabled control. */
         default:
-          "bg-white text-black border-slate-200 border-2 border-b-4 active:border-b-2 hover:bg-slate-100 text-slate-500",
+          "bg-surface text-ink-muted border-line border-2 border-b-4 active:border-b-2 hover:bg-surface-hover",
 
-        // custom
         locked:
-          "bg-neutral-200 text-primary-foreground hover:bg-neutral-200/90 border-neutral-400 border-b-4 active:border-b-0",
+          "bg-surface-raised text-ink-faint hover:bg-surface-raised border-line-strong border-b-4 active:border-b-0 cursor-not-allowed",
 
         primary:
-          "bg-sky-400 text-primary-foreground hover:bg-sky-400/90 border-sky-500 border-b-4 active:border-b-0",
-        primaryOutline: "bg-white text-sky-500 hover:bg-slate-100",
+          "lift-accent bg-accent text-accent-ink hover:brightness-110 border-0 active:translate-y-px",
+        primaryOutline: "bg-transparent text-accent border-2 border-accent/40 hover:bg-accent/10",
 
         secondary:
-          "bg-green-500 text-primary-foreground hover:bg-green-500/90 border-green-600 border-b-4 active:border-b-0",
-        secondaryOutline: "bg-white text-green-500 hover:bg-slate-100",
+          "lift-accent bg-correct text-accent-ink hover:brightness-110 border-0 active:translate-y-px",
+        secondaryOutline: "bg-transparent text-correct border-2 border-correct/40 hover:bg-correct/10",
 
         danger:
-          "bg-rose-500 text-primary-foreground hover:bg-rose-500/90 border-rose-600 border-b-4 active:border-b-0",
-        dangerOutline: "bg-white text-rose-500 hover:bg-slate-100",
+          "bg-wrong text-accent-ink shadow-[0_6px_18px_-6px_hsl(var(--wrong)/0.55)] hover:brightness-110 border-0 active:translate-y-px",
+        dangerOutline: "bg-transparent text-wrong border-2 border-wrong/40 hover:bg-wrong/10",
 
         super:
-          "bg-indigo-500 text-primary-foreground hover:bg-indigo-500/90 border-indigo-600 border-b-4 active:border-b-0",
-        superOutline: "bg-white text-indigo-500 hover:bg-slate-100",
+          "bg-indigo-400 text-accent-ink hover:bg-indigo-400/90 border-indigo-600 border-b-4 active:border-b-0",
+        superOutline: "bg-transparent text-indigo-300 border-2 border-indigo-400/40 hover:bg-indigo-400/10",
 
         ghost:
-          "bg-transparent text-slate-500 border-transparent border-0 hover:bg-slate-100",
+          "bg-transparent text-ink-muted border-transparent border-0 hover:bg-surface-raised hover:text-ink",
 
         sidebar:
-          "bg-transparent text-slate-500 border-2 border-transparent hover:bg-slate-100 transition-none",
+          "bg-transparent text-ink-muted border-2 border-transparent hover:bg-surface-raised transition-none",
         sidebarOutline:
-          "bg-sky-500/15 text-sky-500 border-sky-300 border-2 hover:bg-sky-500/20 transition-none",
+          "bg-accent/15 text-accent border-accent/40 border-2 hover:bg-accent/20 transition-none",
       },
       size: {
         default: "h-11 px-4 py-2",

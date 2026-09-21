@@ -127,12 +127,33 @@ class SessionLoopTest(unittest.TestCase):
         self.assertIn("SELF_RATINGS", quiz)
 
     def test_feedback_is_colour_coded_before_it_is_read(self):
+        """Right and wrong must differ in colour, not only in wording.
+
+        Asserted against the theme tokens rather than literal Tailwind
+        palette classes, because the app is dark-only and colour now comes
+        from `--correct` and `--wrong`. The property being protected is
+        unchanged: the answer card and the explanation panel both carry the
+        outcome before a word of it is read.
+        """
         card = source("lesson", "card.tsx")
-        self.assertIn("bg-green-100", card)
-        self.assertIn("bg-rose-100", card)
+        self.assertIn("bg-correct/15", card)
+        self.assertIn("bg-wrong/15", card)
         quiz = source("lesson", "quiz.tsx")
-        self.assertIn("border-green-300 bg-green-50", quiz)
-        self.assertIn("border-rose-300 bg-rose-50", quiz)
+        self.assertIn("border-correct/50 bg-correct/10", quiz)
+        self.assertIn("border-wrong/50 bg-wrong/10", quiz)
+
+    def test_the_theme_is_dark_and_defined_once(self):
+        """Dark is the app's only theme, set by token rather than by variant.
+
+        A `dark:` variant on each surface is a place to forget one, and a
+        forgotten one is a white card in a dark room at midnight.
+        """
+        css = (ROOT / "ui" / "src" / "index.css").read_text(encoding="utf-8")
+        self.assertIn("color-scheme: dark", css)
+        for token in ("--canvas", "--surface", "--ink", "--correct", "--wrong"):
+            self.assertIn(token, css)
+        for path in (ROOT / "ui" / "src").rglob("*.tsx"):
+            self.assertNotIn("dark:", path.read_text(encoding="utf-8"), path.name)
 
     def test_every_answer_shows_the_source_it_came_from(self):
         """The line between a tutor and a plausible guess."""

@@ -43,6 +43,18 @@ export type Question = {
   target_seconds: number;
 };
 
+export type Assessment = {
+  exam_id: number;
+  course_code: string;
+  exam_title: string;
+  exam_date: string;
+  kind: "quiz" | "exam" | "final";
+  scope: string[];
+  days_left: number;
+  readiness: number;
+  questions: number;
+};
+
 export type Profile = {
   xp: number;
   combo: number;
@@ -151,7 +163,10 @@ export const api = {
 
   path: (campaign?: string) => request<{ units: PathUnit[] }>(query("/api/path", { campaign })),
 
-  session: (params: { campaign?: string; topic?: string; limit?: number }) =>
+  assessments: (campaign?: string) =>
+    request<{ assessments: Assessment[] }>(query("/api/assessments", { campaign })),
+
+  session: (params: { campaign?: string; topic?: string; exam?: number; limit?: number }) =>
     request<{ questions: Question[] }>(query("/api/session", params)),
 
   reviewPreview: (payload: {

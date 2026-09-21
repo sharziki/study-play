@@ -1,0 +1,161 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Dark by default.
+ *
+ * This is a study app for one person who studies at night and has said plainly
+ * that he wants dark mode always. So dark is not a toggle away from the real
+ * design; it IS the design, and `:root` carries it. A light theme still exists
+ * under `.theme-light` for a bright room, but nothing has to be chosen for the
+ * app to look the way it should.
+ *
+ * Every surface reads from these tokens rather than from a literal `bg-white`,
+ * because the previous build hard-coded white in eight components and a ninth
+ * in `button.tsx`. Hard-coded colour is what makes a theme switch look broken
+ * in exactly the places nobody screenshots.
+ */
+@layer base {
+  :root {
+    /* Near-black with a trace of blue, so large fields read as considered
+       rather than as switched-off. Pure #000 next to coloured cards looks like
+       a rendering failure. */
+    --surface: 224 24% 7%;
+    --surface-raised: 223 22% 11%;
+    --surface-sunken: 225 26% 5%;
+    --line: 222 18% 20%;
+    --line-strong: 221 16% 28%;
+
+    --text: 213 31% 94%;
+    --text-muted: 215 16% 66%;
+    --text-faint: 217 14% 48%;
+
+    --background: var(--surface);
+    --foreground: var(--text);
+    --secondary: 223 22% 14%;
+    --primary: 199 89% 55%;
+    --primary-foreground: 224 24% 7%;
+    --ring: 199 89% 55%;
+    --ring-offset-background: var(--surface);
+
+    /* Assessment accents. A quiz and an exam are different kinds of work and
+       must never be told apart by the countdown alone. */
+    --quiz: 259 84% 68%;
+    --exam: 199 89% 55%;
+    --final: 349 80% 62%;
+
+    color-scheme: dark;
+  }
+
+  .theme-light {
+    --surface: 0 0% 100%;
+    --surface-raised: 0 0% 100%;
+    --surface-sunken: 210 40% 98%;
+    --line: 214 32% 91%;
+    --line-strong: 213 27% 84%;
+
+    --text: 222 47% 11%;
+    --text-muted: 215 16% 47%;
+    --text-faint: 215 20% 65%;
+
+    --primary: 199 89% 48%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%;
+    --ring: 199 89% 48%;
+
+    --quiz: 259 70% 55%;
+    --exam: 199 89% 48%;
+    --final: 349 75% 52%;
+
+    color-scheme: light;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    background-color: hsl(var(--surface));
+  }
+
+  body {
+    @apply bg-surface text-text antialiased;
+    font-family: ui-rounded, "SF Pro Rounded", "Nunito", system-ui, sans-serif;
+    /* The quiz is a fixed-height column on a phone; the page itself never
+       scrolls, only the question area does. */
+    overscroll-behavior-y: none;
+  }
+
+  /* Default border colour, so `border-2` alone is themed. Tailwind's own
+     default is a light grey that vanishes on a dark surface. */
+  * {
+    border-color: hsl(var(--line));
+  }
+
+  .katex { font-size: 1.05em; }
+}
+
+@layer base {
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+}
+
+/* KaTeX rules live OUTSIDE @layer base deliberately.
+ *
+ * These class names only ever appear in markup KaTeX creates at runtime, so
+ * Tailwind's content scan never sees them. Inside a layer they were silently
+ * purged from every build: the source file had the rules, the shipped CSS had
+ * none of them. Verified by grepping the build output, which is the only
+ * place that counts.
+ */
+/* Display math must scroll inside its column rather than widening the page,
+   which on a phone otherwise makes the whole session horizontally pannable. */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+}
+
+/* Inline math is an unbreakable box. A single wide expression — a fraction
+   of polynomials, say — pushes its line past the viewport and clips the
+   WORDS on either side, which is how "Why is it valid to factor" lost "is
+   it" and "cancel" on a 390px screen. Found by rendering a real prompt at
+   phone width, not by reading the CSS.
+
+   Each expression scrolls on its own, so the sentence keeps wrapping
+   normally and only the oversized maths pans. */
+.katex {
+  max-width: 100%;
+  display: inline-block;
+  overflow-x: auto;
+  overflow-y: hidden;
+  vertical-align: middle;
+}
+
+/* The display wrapper must not become an inline-block itself, or centred
+   display math collapses to the left of its column. */
+.katex-display > .katex {
+  display: block;
+  max-width: none;
+  overflow: visible;
+}
+
+/* KaTeX ships its own colour for some atoms; inherit so maths is the same
+   colour as the sentence carrying it under either theme. */
+.katex,
+.katex .mord,
+.katex .mbin,
+.katex .mrel,
+.katex .mopen,
+.katex .mclose,
+.katex .mpunct,
+.katex .mop {
+  color: inherit;
+}

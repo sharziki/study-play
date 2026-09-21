@@ -158,7 +158,7 @@ export const Quiz = ({ questions, onExit }: QuizProps) => {
         )}
         <div className="mx-auto flex h-full max-w-lg flex-col items-center justify-center gap-y-5 px-6 text-center lg:gap-y-8">
           <img src={finishSvg} alt="" aria-hidden height={100} width={100} />
-          <h1 className="text-lg font-bold text-neutral-700 lg:text-3xl">
+          <h1 className="text-lg font-bold text-ink lg:text-3xl">
             Session complete.
             <br />
             {Math.floor(seconds / 60)}m {seconds % 60}s of retrieval.
@@ -191,11 +191,11 @@ export const Quiz = ({ questions, onExit }: QuizProps) => {
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[600px] flex-col gap-y-8 px-6 py-8 lg:px-0">
           <div>
-            <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">
+            <p className="mb-2 text-xs font-bold uppercase tracking-wide text-ink-faint">
               {question.topic}
               {question.boss && <span className="ml-2 text-amber-500">Boss round</span>}
             </p>
-            <MathText as="h1" className="block text-lg font-bold leading-snug text-neutral-700 lg:text-2xl">
+            <MathText as="h1" className="block text-lg font-bold leading-snug text-ink lg:text-2xl">
               {question.prompt}
             </MathText>
           </div>
@@ -218,17 +218,17 @@ export const Quiz = ({ questions, onExit }: QuizProps) => {
               disabled={pending || status !== "none" || !!preview}
               rows={4}
               placeholder="Answer from memory, then check."
-              className="w-full resize-none rounded-xl border-2 border-b-4 p-4 text-base leading-relaxed outline-none focus:border-sky-300 disabled:bg-slate-50"
+              className="w-full resize-none rounded-xl border-2 border-b-4 border-line bg-surface p-4 text-base leading-relaxed text-ink outline-none placeholder:text-ink-faint focus:border-accent disabled:bg-surface/60"
             />
           )}
 
           {awaitingSelfRating && (
             <div className="rounded-xl border-2 border-b-4 p-4">
-              <p className="mb-3 text-sm font-bold text-neutral-700">Answer</p>
-              <MathText as="p" className="block text-sm leading-relaxed text-neutral-600">
+              <p className="mb-3 text-sm font-bold text-ink">Answer</p>
+              <MathText as="p" className="block text-sm leading-relaxed text-ink-muted">
                 {preview.answer}
               </MathText>
-              <p className="mb-2 mt-4 text-xs font-bold uppercase tracking-wide text-slate-400">
+              <p className="mb-2 mt-4 text-xs font-bold uppercase tracking-wide text-ink-faint">
                 How did that recall go?
               </p>
               <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
@@ -249,26 +249,28 @@ export const Quiz = ({ questions, onExit }: QuizProps) => {
           {status !== "none" && preview && (
             <div
               className={cn(
-                "rounded-xl border-2 border-b-4 p-4",
-                status === "correct" ? "border-green-300 bg-green-50" : "border-rose-300 bg-rose-50"
+                "state-panel rounded-xl border-2 border-b-4 p-4",
+                status === "correct"
+                  ? "border-correct/50 bg-correct/10 text-correct"
+                  : "border-wrong/50 bg-wrong/10 text-wrong"
               )}
             >
               {status === "wrong" && (
                 <>
-                  <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-400">Answer</p>
-                  <MathText as="p" className="mb-3 block text-sm leading-relaxed text-neutral-700">
+                  <p className="mb-1 text-xs font-bold uppercase tracking-wide text-ink-faint">Answer</p>
+                  <MathText as="p" className="mb-3 block text-sm font-semibold leading-relaxed text-ink">
                     {preview.answer}
                   </MathText>
                 </>
               )}
-              <MathText as="p" className="block text-sm leading-relaxed text-neutral-600">
+              <MathText as="p" className="block text-sm leading-relaxed text-ink-muted">
                 {preview.explanation}
               </MathText>
               {preview.source_quote && (
                 /* Every question is generated from real course material and
                    must show the exact sentence it came from. This is the line
                    between a tutor and a plausible-sounding guess. */
-                <blockquote className="mt-3 border-l-4 border-slate-200 pl-3 text-xs italic leading-relaxed text-slate-500">
+                <blockquote className="mt-3 border-l-4 border-line-strong pl-3 text-xs italic leading-relaxed text-ink-faint">
                   <MathText>{preview.source_quote}</MathText>
                 </blockquote>
               )}

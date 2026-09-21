@@ -60,7 +60,7 @@ export const MathText = ({ children, className, as: Tag = "span" }: MathTextProp
     parts.push(
       <code
         key={`${start}-${match[1]}`}
-        className="whitespace-pre-wrap rounded bg-slate-100 px-1 py-0.5 font-mono text-[0.9em] text-slate-700"
+        className="whitespace-pre-wrap rounded bg-surface-raised px-1 py-0.5 font-mono text-[0.9em] text-ink"
       >
         {match[1]}
       </code>

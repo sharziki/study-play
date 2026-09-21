@@ -3,7 +3,8 @@ import { Flame } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { usePlayer } from "@/store/player";
-import type { ClassSummary, Dashboard } from "@/lib/api";
+import { UpNext } from "@/learn/up-next";
+import type { Assessment, ClassSummary, Dashboard } from "@/lib/api";
 
 const heart = "/assets/heart.svg";
 const points = "/assets/points.svg";
@@ -11,15 +12,17 @@ const points = "/assets/points.svg";
 type StatsRailProps = {
   dashboard: Dashboard | null;
   classes: ClassSummary[];
+  assessments: Assessment[];
+  onStartExam: (assessment: Assessment) => void;
 };
 
-export const StatsRail = ({ dashboard, classes }: StatsRailProps) => {
+export const StatsRail = ({ dashboard, classes, assessments, onStartExam }: StatsRailProps) => {
   const { hearts, goalXP, goalTarget, campaign, setCampaign } = usePlayer();
   const profile = dashboard?.profile;
 
   return (
     <div className="sticky top-0 flex flex-col gap-y-4 pt-4">
-      <div className="flex items-center justify-between gap-2 rounded-xl border-2 p-3 tabular-nums">
+      <div className="lift flex items-center justify-between gap-2 rounded-xl border border-line bg-surface p-3 tabular-nums">
         <div className="flex items-center gap-1.5 font-bold text-orange-500">
           <img src={points} alt="" aria-hidden width={22} height={22} />
           {profile?.xp ?? 0}
@@ -34,14 +37,14 @@ export const StatsRail = ({ dashboard, classes }: StatsRailProps) => {
         </div>
       </div>
 
-      <div className="rounded-xl border-2 p-3">
+      <div className="lift rounded-xl border border-line bg-surface p-3">
         <div className="mb-2 flex items-baseline justify-between">
-          <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Today</p>
-          <p className="text-xs font-bold text-slate-500">
+          <p className="text-xs font-bold uppercase tracking-wide text-ink-faint">Today</p>
+          <p className="text-xs font-bold text-ink-muted">
             {goalXP}/{goalTarget} XP
           </p>
         </div>
-        <div className="h-3 w-full overflow-hidden rounded-full bg-slate-100">
+        <div className="h-3 w-full overflow-hidden rounded-full bg-surface-raised">
           <div
             className="h-full rounded-full bg-green-500 transition-all"
             style={{ width: `${Math.min(100, (goalXP / goalTarget) * 100)}%` }}
@@ -55,7 +58,9 @@ export const StatsRail = ({ dashboard, classes }: StatsRailProps) => {
             onClick={() => setCampaign("")}
             className={cn(
               "rounded-full border-2 px-3 py-1 text-xs font-bold uppercase tracking-wide",
-              campaign === "" ? "border-sky-300 bg-sky-500/15 text-sky-600" : "text-slate-500"
+              campaign === ""
+                ? "border-accent/50 bg-accent/15 text-accent"
+                : "border-line text-ink-muted hover:border-line-strong"
             )}
           >
             All
@@ -67,9 +72,11 @@ export const StatsRail = ({ dashboard, classes }: StatsRailProps) => {
               title={`${item.title} · ${item.due} due`}
               className={cn(
                 "rounded-full border-2 px-3 py-1 text-xs font-bold uppercase tracking-wide",
-                campaign === item.name ? "border-sky-300 bg-sky-500/15 text-sky-600" : "text-slate-500",
+                campaign === item.name
+                  ? "border-accent/50 bg-accent/15 text-accent"
+                  : "border-line text-ink-muted hover:border-line-strong",
                 // An exam inside two days outranks whatever is selected.
-                item.days_left != null && item.days_left <= 2 && "border-rose-300 text-rose-500"
+                item.days_left != null && item.days_left <= 2 && "border-wrong/60 text-wrong"
               )}
             >
               {item.short}
@@ -81,12 +88,14 @@ export const StatsRail = ({ dashboard, classes }: StatsRailProps) => {
         </div>
       )}
 
+      <UpNext assessments={assessments} onStart={onStartExam} />
+
       {dashboard && (
-        <div className="rounded-xl border-2 p-3 text-sm text-slate-500">
-          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">Queue</p>
+        <div className="rounded-xl border border-line bg-surface p-3 text-sm text-ink-muted lift">
+          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-ink-faint">Queue</p>
           <p>
-            <b className="text-slate-700">{dashboard.due_count}</b> due ·{" "}
-            <b className="text-slate-700">{dashboard.questions_count}</b> questions
+            <b className="text-ink">{dashboard.due_count}</b> due ·{" "}
+            <b className="text-ink">{dashboard.questions_count}</b> questions
           </p>
         </div>
       )}

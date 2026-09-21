@@ -2,31 +2,90 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Dark is the only theme.
+ *
+ * Sharvil studies at night and asked for dark always, so this is not a
+ * preference toggle that starts light and needs finding. Every surface colour
+ * is a token, which is what makes that a one-file decision rather than a
+ * `dark:` variant on several hundred class strings, each of which is a place
+ * to forget one.
+ *
+ * The palette is a warm near-black rather than pure #000: an OLED phone
+ * renders true black as an off pixel, so text on it smears while scrolling.
+ * Surfaces step up in lightness with elevation, which is how a card reads as
+ * sitting above the page without needing a border.
+ */
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222 47% 11%;
-    --primary: 199 89% 48%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 210 40% 96%;
-    --ring: 199 89% 48%;
-    --ring-offset-background: 0 0% 100%;
+    color-scheme: dark;
+
+    /* Page, then each step of elevation above it. */
+    --canvas: 225 14% 8%;
+    --surface: 225 13% 11%;
+    --surface-raised: 224 12% 15%;
+    --surface-hover: 224 12% 18%;
+
+    /* Hairlines. The second is for a control that must read as interactive. */
+    --line: 225 10% 20%;
+    --line-strong: 225 9% 28%;
+
+    /* Text, in descending emphasis. */
+    --ink: 220 20% 96%;
+    --ink-muted: 220 12% 72%;
+    --ink-faint: 220 10% 52%;
+
+    --accent: 199 89% 55%;
+    --accent-ink: 225 14% 8%;
+    --correct: 152 60% 46%;
+    --wrong: 350 78% 62%;
+
+    /* Kept for the borrowed components' semantic names. */
+    --background: var(--canvas);
+    --foreground: var(--ink);
+    --primary: var(--accent);
+    --primary-foreground: var(--accent-ink);
+    --secondary: var(--surface-raised);
+    --ring: var(--accent);
+    --ring-offset-background: var(--canvas);
   }
 
   html {
     -webkit-text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
+    background-color: hsl(var(--canvas));
   }
 
   body {
-    @apply bg-white text-slate-700 antialiased;
+    @apply bg-canvas text-ink antialiased;
     font-family: ui-rounded, "SF Pro Rounded", "Nunito", system-ui, sans-serif;
     /* The quiz is a fixed-height column on a phone; the page itself never
        scrolls, only the question area does. */
     overscroll-behavior-y: none;
   }
 
-  .katex { font-size: 1.05em; }
+  /* A dark page needs slightly lighter strokes to hold the same weight, and
+     maths is thin-stroked to begin with. */
+  .katex {
+    font-size: 1.05em;
+    color: hsl(var(--ink));
+  }
+
+  ::selection {
+    background: hsl(var(--accent) / 0.3);
+  }
+
+  /* Numbers in the UI chrome are compared, not read as prose: a heart count
+     and an exam countdown should not reflow their own width as they change. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The scrollbar is part of the page on a dark theme; left default it is a
+     bright rail down the side of every long question. */
+  * {
+    scrollbar-color: hsl(var(--line-strong)) transparent;
+    scrollbar-width: thin;
+  }
 }
 
 @layer base {
@@ -40,7 +99,6 @@
       scroll-behavior: auto !important;
     }
   }
-
 }
 
 /* KaTeX rules live OUTSIDE @layer base deliberately.
@@ -81,4 +139,31 @@
   display: block;
   max-width: none;
   overflow: visible;
+}
+
+/* A raised surface reads as raised because light falls on its top edge and it
+   casts shadow below, not because it has a brighter border all the way round.
+   One inset hairline plus a real shadow is the whole effect. */
+.lift {
+  box-shadow:
+    inset 0 1px 0 0 hsl(0 0% 100% / 0.04),
+    0 1px 2px -1px hsl(0 0% 0% / 0.6),
+    0 4px 12px -4px hsl(0 0% 0% / 0.5);
+}
+
+/* The primary action carries its own light, so it stays the brightest thing on
+   the screen without needing to be larger than everything else. */
+.lift-accent {
+  box-shadow:
+    inset 0 1px 0 0 hsl(0 0% 100% / 0.22),
+    0 1px 2px -1px hsl(0 0% 0% / 0.6),
+    0 6px 18px -6px hsl(var(--correct) / 0.55);
+}
+
+/* Maths inside a coloured state panel inherits that panel's colour rather than
+   reverting to body ink, or a correct answer's expression reads as ordinary
+   text while the words around it are green. */
+.state-panel .katex,
+.state-panel .katex * {
+  color: inherit;
 }

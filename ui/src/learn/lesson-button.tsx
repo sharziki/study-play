@@ -57,18 +57,24 @@ export const LessonButton = ({
       >
         {current ? (
           <div className="relative h-[102px] w-[102px]">
-            <div className="absolute -top-6 left-2.5 z-10 animate-bounce rounded-xl border-2 bg-white px-3 py-2.5 text-sm font-bold uppercase tracking-wide text-green-500">
+            <div className="lift absolute -top-6 left-2.5 z-10 animate-bounce rounded-xl border border-line bg-surface-raised px-3 py-2.5 text-sm font-bold uppercase tracking-wide text-correct">
               Start
               <div
-                className="absolute -bottom-2 left-1/2 h-0 w-0 -translate-x-1/2 transform border-x-8 border-t-8 border-x-transparent"
+                className="absolute -bottom-2 left-1/2 h-0 w-0 -translate-x-1/2 transform border-x-8 border-t-8 border-x-transparent border-t-line"
                 aria-hidden
               />
             </div>
             <CircularProgressbarWithChildren
               value={Number.isNaN(percentage) ? 0 : percentage}
-              styles={{ path: { stroke: "#4ade80" }, trail: { stroke: "#e5e7eb" } }}
+              /* The trail was a hardcoded light grey, which on a dark page
+                 reads as a bright white ring around the current node — the
+                 single loudest thing on the screen, for a progress track. */
+              styles={{
+                path: { stroke: "hsl(152 60% 46%)" },
+                trail: { stroke: "hsl(225 10% 20%)" },
+              }}
             >
-              <Button size="rounded" variant="secondary" className="h-[70px] w-[70px] border-b-8">
+              <Button size="rounded" variant="secondary" className="h-[70px] w-[70px]">
                 <Icon className="h-10 w-10 fill-primary-foreground text-primary-foreground" />
               </Button>
             </CircularProgressbarWithChildren>
@@ -77,13 +83,13 @@ export const LessonButton = ({
           <Button
             size="rounded"
             variant={locked ? "locked" : "secondary"}
-            className="h-[70px] w-[70px] border-b-8"
+            className="h-[70px] w-[70px]"
           >
             <Icon
               className={cn(
                 "h-10 w-10",
                 locked
-                  ? "fill-neutral-400 stroke-neutral-400 text-neutral-400"
+                  ? "fill-ink-faint/40 stroke-ink-faint text-ink-faint"
                   : "fill-primary-foreground text-primary-foreground",
                 isCompleted && "fill-none stroke-[4]"
               )}

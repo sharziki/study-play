@@ -38,7 +38,7 @@ export const Learn = ({ onStart }: LearnProps) => {
     return (
       <div className="flex flex-col items-center gap-4 py-20 text-center">
         <img src={mascotSad} alt="" aria-hidden width={80} height={80} />
-        <p className="font-bold text-neutral-700">{error}</p>
+        <p className="font-bold text-ink">{error}</p>
         <Button variant="primary" onClick={() => void load()}>
           Retry
         </Button>
@@ -46,13 +46,13 @@ export const Learn = ({ onStart }: LearnProps) => {
     );
   }
 
-  if (!units) return <p className="py-20 text-center text-sm text-slate-400">Loading your path…</p>;
+  if (!units) return <p className="py-20 text-center text-sm text-ink-faint">Loading your path…</p>;
 
   if (!units.length) {
     return (
       <div className="flex flex-col items-center gap-4 py-20 text-center">
         <img src={mascotSad} alt="" aria-hidden width={80} height={80} />
-        <p className="max-w-xs font-bold text-neutral-700">
+        <p className="max-w-xs font-bold text-ink">
           No material yet. Import notes or a PDF and Intellect builds the path for you.
         </p>
       </div>

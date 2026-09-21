@@ -5,8 +5,9 @@ import { Toaster, toast } from "sonner";
 import { StatsRail } from "@/components/stats-rail";
 import { Button } from "@/components/ui/button";
 import { Learn } from "@/learn/learn";
+import { UpNext } from "@/learn/up-next";
 import { Quiz } from "@/lesson/quiz";
-import { api, type ClassSummary, type Dashboard, type Question } from "@/lib/api";
+import { api, type Assessment, type ClassSummary, type Dashboard, type Question } from "@/lib/api";
 import { usePlayer } from "@/store/player";
 
 const SESSION_LENGTH = 10;
@@ -15,25 +16,34 @@ export const App = () => {
   const campaign = usePlayer((state) => state.campaign);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [classes, setClasses] = useState<ClassSummary[]>([]);
+  const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [session, setSession] = useState<Question[] | null>(null);
   const [starting, setStarting] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      const [dash, cls] = await Promise.all([api.dashboard(), api.classes()]);
+      const [dash, cls, next] = await Promise.all([
+        api.dashboard(),
+        api.classes(),
+        api.assessments(campaign || undefined),
+      ]);
       setDashboard(dash);
       setClasses(cls.classes);
+      setAssessments(next.assessments);
     } catch {
       /* The path screen reports its own failure; the rail can stay empty. */
     }
-  }, []);
+    // Selecting a class must re-fetch, or Up Next keeps offering another
+    // course's exams after the switch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaign]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
   const start = useCallback(
-    async (params: { campaign?: string; topic?: string }) => {
+    async (params: { campaign?: string; topic?: string; exam?: number }) => {
       if (starting) return;
       setStarting(true);
       try {
@@ -84,10 +94,21 @@ export const App = () => {
     <div className="mx-auto flex h-[100dvh] max-w-[1056px] flex-col">
       <main className="flex flex-1 gap-x-8 overflow-y-auto px-4 lg:px-6">
         <div className="min-w-0 flex-1">
+          {/* On a phone the rail is hidden, so this rides above the path.
+              What is on Tuesday's quiz is the most useful thing on the
+              screen, and the phone is where he actually studies. */}
+          <div className="pt-4 lg:hidden">
+            <UpNext assessments={assessments} onStart={(item) => void start({ exam: item.exam_id })} />
+          </div>
           <Learn onStart={start} />
         </div>
         <aside className="hidden w-[320px] shrink-0 lg:block">
-          <StatsRail dashboard={dashboard} classes={classes} />
+          <StatsRail
+            dashboard={dashboard}
+            classes={classes}
+            assessments={assessments}
+            onStartExam={(item) => void start({ exam: item.exam_id })}
+          />
         </aside>
       </main>
 
@@ -122,7 +143,7 @@ const StatsRailCompact = ({ dashboard }: { dashboard: Dashboard | null }) => {
         <Flame className="h-4 w-4 fill-amber-500" />
         {dashboard?.profile.daily_streak ?? 0}
       </span>
-      <span className="truncate text-slate-400">
+      <span className="truncate text-ink-faint">
         {goalXP}/{goalTarget}
       </span>
     </div>

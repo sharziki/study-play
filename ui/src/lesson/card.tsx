@@ -25,21 +25,23 @@ export const Card = ({ text, shortcut, selected, onClick, status, disabled }: Ca
     <div
       onClick={handleClick}
       className={cn(
-        "h-full cursor-pointer rounded-xl border-2 border-b-4 p-4 hover:bg-black/5 active:border-b-2 lg:p-6",
-        selected && "border-sky-300 bg-sky-100 hover:bg-sky-100",
-        selected && status === "correct" && "border-green-300 bg-green-100 hover:bg-green-100",
-        selected && status === "wrong" && "border-rose-300 bg-rose-100 hover:bg-rose-100",
-        disabled && "pointer-events-none hover:bg-white"
+        "lift h-full cursor-pointer rounded-xl border border-b-2 border-line bg-surface p-4",
+        "transition-all duration-150 hover:border-line-strong hover:bg-surface-hover",
+        "active:translate-y-px active:border-b lg:p-6",
+        selected && "border-accent bg-accent/10 ring-1 ring-accent/60 hover:bg-accent/10",
+        selected && status === "correct" && "border-correct bg-correct/15 ring-correct/60 hover:bg-correct/15",
+        selected && status === "wrong" && "border-wrong bg-wrong/15 ring-wrong/60 hover:bg-wrong/15",
+        disabled && "pointer-events-none hover:bg-surface"
       )}
     >
       <div className="flex items-start justify-between gap-4">
         <MathText
           as="p"
           className={cn(
-            "text-left text-sm leading-relaxed text-neutral-600 lg:text-base",
-            selected && "text-sky-600",
-            selected && status === "correct" && "text-green-600",
-            selected && status === "wrong" && "text-rose-600"
+            "text-left text-sm leading-relaxed text-ink-muted lg:text-base",
+            selected && "text-ink",
+            selected && status === "correct" && "text-correct",
+            selected && status === "wrong" && "text-wrong"
           )}
         >
           {text}
@@ -47,10 +49,10 @@ export const Card = ({ text, shortcut, selected, onClick, status, disabled }: Ca
 
         <div
           className={cn(
-            "flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-lg border-2 text-xs font-semibold text-neutral-400 lg:h-[30px] lg:w-[30px] lg:text-[15px]",
-            selected && "border-sky-300 text-sky-500",
-            selected && status === "correct" && "border-green-500 text-green-500",
-            selected && status === "wrong" && "border-rose-500 text-rose-500"
+            "flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-lg border-2 border-line-strong text-xs font-semibold text-ink-faint lg:h-[30px] lg:w-[30px] lg:text-[15px]",
+            selected && "border-accent text-accent",
+            selected && status === "correct" && "border-correct text-correct",
+            selected && status === "wrong" && "border-wrong text-wrong"
           )}
         >
           {shortcut}

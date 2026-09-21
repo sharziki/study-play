@@ -14,7 +14,11 @@ const url = process.argv[2] ?? "http://localhost:4173/";
 const shotIndex = process.argv.indexOf("--shot");
 const shot = shotIndex > -1 ? process.argv[shotIndex + 1] : null;
 
-const browser = await chromium.launch();
+// The bundled browser build is pinned by playwright-core's version, and a
+// machine may already carry a different one. Honour an explicit path so the
+// check runs against whatever Chromium is actually installed here.
+const executablePath = process.env.CHROMIUM_PATH || undefined;
+const browser = await chromium.launch({ executablePath });
 const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
 const errors = [];
 page.on("console", (message) => {

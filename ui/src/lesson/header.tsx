@@ -19,7 +19,7 @@ export const Header = ({ hearts, percentage, examLabel, daysLeft, onExit }: Head
   return (
     <header className="mx-auto w-full max-w-[1140px] px-6 pt-5 lg:px-10 lg:pt-[50px]">
       <div className="flex items-center justify-between gap-x-7">
-        <button onClick={onExit} aria-label="Exit session" className="text-slate-500 transition hover:opacity-75">
+        <button onClick={onExit} aria-label="Exit session" className="text-ink-muted transition hover:opacity-75">
           <X />
         </button>
 
@@ -34,7 +34,7 @@ export const Header = ({ hearts, percentage, examLabel, daysLeft, onExit }: Head
       {examLabel && (
         <p
           className={cn(
-            "mt-2 text-center text-xs font-bold uppercase tracking-wide text-slate-400",
+            "mt-2 text-center text-xs font-bold uppercase tracking-wide text-ink-faint",
             daysLeft != null && daysLeft <= 7 && "text-amber-500",
             daysLeft != null && daysLeft <= 2 && "text-rose-500"
           )}
