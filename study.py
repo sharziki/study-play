@@ -875,6 +875,28 @@ def repair_math(text: str) -> str:
     return "".join(out)
 
 
+# A material imported per section names it: "MA 26100 · 14.4 14.5 Arc length".
+MATERIAL_SECTIONS = re.compile(r"·\s*((?:1[0-9]\.\d[ab]?\s*)+)")
+
+
+def section_of(material: sqlite3.Row, question: dict) -> str:
+    """The textbook section a question belongs to, from its material's title.
+
+    A material covering exactly one section gives its questions that section
+    outright. One covering two — arc length and curvature are taught together —
+    cannot, because the title does not say which half a given question tests,
+    so those are left for the classifier in `tools/tag_sections.py` to place by
+    content rather than guessed at here.
+    """
+    keys = material.keys() if hasattr(material, "keys") else []
+    title = material["title"] if "title" in keys else ""
+    found = MATERIAL_SECTIONS.search(title or "")
+    if not found:
+        return ""
+    sections = found.group(1).split()
+    return sections[0] if len(sections) == 1 else ""
+
+
 def save_questions(db: sqlite3.Connection, material: sqlite3.Row, questions: list[dict]) -> int:
     saved = 0
     for q in questions:
@@ -906,11 +928,17 @@ def save_questions(db: sqlite3.Connection, material: sqlite3.Row, questions: lis
         cursor = db.execute(
             """INSERT OR IGNORE INTO questions
                (material_id,prompt,answer,explanation,topic,kind,difficulty,source_quote,
-                choices_json,correct_choice,created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                choices_json,correct_choice,section,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (material["id"], q["prompt"].strip(), answer, q["explanation"].strip(),
              q["topic"].strip(), q.get("kind", "recall"), int(q["difficulty"]), quote,
-             json.dumps(choices), correct_choice, now().isoformat()),
+             json.dumps(choices), correct_choice,
+             # A quiz is defined by its textbook sections, so a question that
+             # arrives untagged is invisible to quiz scope until someone
+             # remembers to run the tagger. Tagging at save time removes that
+             # step: the material's own title names the section it teaches.
+             section_of(material, q),
+             now().isoformat()),
         )
         if cursor.rowcount:
             db.execute(

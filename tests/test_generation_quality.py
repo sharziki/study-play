@@ -109,6 +109,42 @@ class SelfContainedTest(unittest.TestCase):
             self.assertTrue(study.is_self_contained(prompt), prompt)
 
 
+class SectionTaggingTest(unittest.TestCase):
+    """A question must know which textbook section it examines.
+
+    A quiz is defined by its sections, so an untagged question is invisible to
+    quiz scope no matter how good it is - it sits in the bank and never
+    appears the night before the quiz that tests it.
+    """
+
+    class Row(dict):
+        def keys(self):
+            return list(dict.keys(self))
+
+    def test_a_single_section_material_tags_its_questions(self):
+        self.assertEqual(
+            study.section_of(self.Row(title="MA 26100 · 15.2 Limits & continuity"), {}),
+            "15.2",
+        )
+
+    def test_a_two_section_material_defers_rather_than_guesses(self):
+        """Arc length and curvature are taught together, so the title cannot
+        say which half a given question tests. Guessing would file curvature
+        questions under arc length and quietly distort both nodes."""
+        self.assertEqual(
+            study.section_of(self.Row(title="MA 26100 · 14.4 14.5 Arc length & curvature"), {}),
+            "",
+        )
+
+    def test_a_chapter_material_has_no_section(self):
+        for title in (
+            "MA 26100 · 1. Vectors and the Geometry of Space",
+            "MA 261 - 15.2 Limits and Continuity",
+            "",
+        ):
+            self.assertEqual(study.section_of(self.Row(title=title), {}), "")
+
+
 class SubjectNotDocumentTest(unittest.TestCase):
     def test_questions_about_the_document_are_rejected(self):
         for prompt in (
