@@ -512,11 +512,31 @@ def material_topics(content: str, limit: int = 40) -> list[str]:
     return seen
 
 
+def existing_topics(db: sqlite3.Connection, material_id: int, limit: int = 30) -> list[str]:
+    """Topic names already in use for this material, largest node first.
+
+    Generation is batched, and each batch was told nothing about what the last
+    one chose, so it invented fresh names every time: section 14.5 ended up
+    with thirteen nodes over sixteen questions. A node that small is completed
+    by one lucky recall, which is not mastery.
+    """
+    return [
+        row["topic"]
+        for row in db.execute(
+            """SELECT topic, COUNT(*) AS n FROM questions
+               WHERE material_id=? AND status='ready'
+               GROUP BY topic ORDER BY n DESC, MIN(id) LIMIT ?""",
+            (material_id, limit),
+        )
+    ]
+
+
 def claude_questions(
     material: sqlite3.Row,
     history: str,
     count: int,
     transfer_only: bool = False,
+    known_topics: list[str] | None = None,
 ) -> list[dict]:
     if not shutil.which("claude"):
         raise RuntimeError("claude CLI not found")
@@ -531,6 +551,17 @@ def claude_questions(
         "COVERAGE (most important): span every distinct idea in the material before "
         "revisiting any one of them.\n"
     )
+    reuse_rule = (
+        "\nTOPIC NAMES ARE NODES, NOT LABELS. These topics already exist for this\n"
+        "material:\n"
+        + "\n".join(f"  - {topic}" for topic in (known_topics or []))
+        + "\nIf a question belongs to one of them, its `topic` field must repeat that\n"
+          "string EXACTLY. Only invent a new topic for an idea genuinely absent from\n"
+          "the list. A renamed topic does not relabel a node, it creates a second one\n"
+          "holding a single question, and a node that small is completed by one lucky\n"
+          "recall rather than by mastery.\n"
+        if known_topics else ""
+    )
     kind_rule = (
         "Every question must be transfer: require applying the material to a genuinely new situation."
         if transfer_only else
@@ -541,7 +572,7 @@ def claude_questions(
 Learner context:
 {history}
 
-{coverage_rule}
+{coverage_rule}{reuse_rule}
 CONCEPTS BEFORE COMPUTATION. For each section, the first question must test the
 idea — why a method works, what makes it necessary, what would break without it,
 or how to recognize when it applies. Only after the idea is examined should a
@@ -1134,14 +1165,20 @@ def generate(material_id: int | None, count: int) -> None:
             print(f"Generating from {material['title']}…", flush=True)
             questions: list[dict] = []
             batches = question_batches(count)
+            known = existing_topics(db, material["id"])
             for index, batch_size in enumerate(batches, 1):
                 if len(batches) > 1:
                     print(f"Batch {index}/{len(batches)}: requesting {batch_size} questions…", flush=True)
-                questions.extend(claude_questions(material, history, batch_size))
+                questions.extend(claude_questions(material, history, batch_size, known_topics=known))
+                # Later batches see what the earlier ones chose, so a name
+                # invented in batch one becomes the node batch two adds to.
+                known = sorted({*known, *(q.get("topic", "").strip() for q in questions if q.get("topic"))})
             retry_count = transfer_retry_count(questions, count)
             if retry_count:
                 print(f"Transfer gap: generating {retry_count} focused candidates…", flush=True)
-                questions.extend(claude_questions(material, history, retry_count, transfer_only=True))
+                questions.extend(claude_questions(
+                    material, history, retry_count, transfer_only=True, known_topics=known
+                ))
             saved = save_questions(db, material, questions)
             db.commit()
             total += saved

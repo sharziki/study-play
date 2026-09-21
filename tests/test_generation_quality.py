@@ -488,3 +488,48 @@ class ExplanationGateTest(unittest.TestCase):
         self.assertEqual(
             self._save("Cancellation is valid off the removed point, so the limits agree."), 1
         )
+
+
+class TopicReuseTest(unittest.TestCase):
+    """Generation must add to the nodes that exist, not invent new ones.
+
+    Batches were told nothing about what earlier batches chose, so each
+    invented its own names: section 14.5 ended up with thirteen nodes over
+    sixteen questions. The path advances on a node's average mastery, so a
+    node that small is completed by one lucky recall.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.temp.name) / "study.db"
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_existing_topics_are_reported_largest_node_first(self):
+        with study.connect(self.db_path) as db:
+            material_id = db.execute(
+                "INSERT INTO materials(title,path,content,content_hash,created_at) VALUES (?,?,?,?,?)",
+                ("Curvature", "memory", MATERIAL, "reuse-hash", study.now().isoformat()),
+            ).lastrowid
+            for topic, copies in (("Curvature", 3), ("Arc length", 1)):
+                for index in range(copies):
+                    db.execute(
+                        """INSERT INTO questions
+                           (material_id,prompt,answer,explanation,topic,kind,difficulty,
+                            source_quote,choices_json,correct_choice,created_at)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                        (material_id, f"{topic} {index}?", "A", "why", topic, "recall", 3,
+                         "quote", "[]", -1, study.now().isoformat()),
+                    )
+            db.commit()
+            self.assertEqual(study.existing_topics(db, material_id), ["Curvature", "Arc length"])
+
+    def test_a_material_with_no_questions_yet_reports_none(self):
+        with study.connect(self.db_path) as db:
+            material_id = db.execute(
+                "INSERT INTO materials(title,path,content,content_hash,created_at) VALUES (?,?,?,?,?)",
+                ("Fresh", "memory", MATERIAL, "fresh-hash", study.now().isoformat()),
+            ).lastrowid
+            db.commit()
+            self.assertEqual(study.existing_topics(db, material_id), [])
