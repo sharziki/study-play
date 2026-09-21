@@ -923,6 +923,15 @@ def save_questions(db: sqlite3.Connection, material: sqlite3.Row, questions: lis
             or choices[correct_choice] != answer
             or not is_self_contained(prompt_text)
             or not tests_the_subject(prompt_text)
+            # The explanation is read too, and it is read at the moment the
+            # learner is most receptive: right after a miss. "The material
+            # states that distance = speed x time" answers a question about
+            # the document rather than about the mathematics, and the gate
+            # only ever checked the prompt.
+            or not tests_the_subject(q.get("explanation", ""))
+            # Plaintext maths in the explanation reaches the screen as literal
+            # characters exactly as it would in a prompt.
+            or has_plaintext_math(repair_math(str(q.get("explanation", ""))))
         ):
             continue
         cursor = db.execute(

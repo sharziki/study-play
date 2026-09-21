@@ -431,3 +431,60 @@ class DocumentTitleTest(unittest.TestCase):
         topics = study.material_topics(MATERIAL)
         self.assertNotIn("Quiz prep — 15.2", topics)
         self.assertTrue(topics)
+
+
+class ExplanationGateTest(unittest.TestCase):
+    """The explanation is held to the same standard as the prompt.
+
+    It is read at the moment the learner is most receptive - right after a
+    miss - and nothing in the app ever shows them the source, so an
+    explanation that appeals to "the material" appeals to something they
+    cannot see. The gate only ever checked the prompt, and 395 questions
+    shipped that way.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.temp.name) / "study.db"
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def _save(self, explanation):
+        with study.connect(self.db_path) as db:
+            material_id = db.execute(
+                "INSERT INTO materials(title,path,content,content_hash,created_at) VALUES (?,?,?,?,?)",
+                ("Quiz prep", "memory", MATERIAL, f"h-{hash(explanation)}", study.now().isoformat()),
+            ).lastrowid
+            db.commit()
+            material = db.execute("SELECT * FROM materials WHERE id=?", (material_id,)).fetchone()
+            return study.save_questions(db, material, [{
+                "prompt": "Why is cancelling the common factor valid here?",
+                "answer": "Because the expressions agree except at the point itself.",
+                "explanation": explanation,
+                "topic": "Factor-and-cancel",
+                "kind": "explanation",
+                "difficulty": 3,
+                "source_quote": "Factor the difference of squares and cancel.",
+                "choices": [
+                    "Because the expressions agree except at the point itself.",
+                    "Because limits ignore denominators.",
+                    "Because 0/0 equals 1.",
+                    "Because substitution always works.",
+                ],
+                "correct_choice": 0,
+            }])
+
+    def test_an_explanation_about_the_document_is_rejected(self):
+        self.assertEqual(self._save("The material states that cancellation is valid off the point."), 0)
+        self.assertEqual(self._save("In the material, this is called a removable discontinuity."), 0)
+
+    def test_an_explanation_with_plaintext_maths_is_rejected(self):
+        """Markup outside \\( \\) reaches the screen as literal characters in an
+        explanation exactly as it would in a prompt."""
+        self.assertEqual(self._save("Because distance = speed × time at every instant of the motion."), 0)
+
+    def test_an_explanation_that_argues_the_mathematics_is_kept(self):
+        self.assertEqual(
+            self._save("Cancellation is valid off the removed point, so the limits agree."), 1
+        )

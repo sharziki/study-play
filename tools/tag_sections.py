@@ -28,6 +28,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import study  # noqa: E402
 
+
+class _Titled(dict):
+    """A row shaped the way `study.section_of` expects."""
+
+    def keys(self):
+        return list(dict.keys(self))
+
 # Purdue MA 261 sections in teaching order, with the terms that identify each.
 # The name comes from the course's published section list; the markers are the
 # words that make a section recognisable on its own.
@@ -150,13 +157,24 @@ def main() -> int:
 
     with study.connect() as db:
         rows = list(db.execute(
-            """SELECT q.id, q.prompt, q.topic FROM questions q
+            """SELECT q.id, q.prompt, q.topic, q.section, m.title AS material_title
+               FROM questions q
                JOIN materials m ON m.id = q.material_id
                WHERE m.campaign = ?""",
             (args.campaign,),
         ))
         for row in rows:
-            section = classify(row["prompt"], row["topic"])
+            # A question generated from a material that teaches exactly one
+            # section already carries the truth, and content matching is a
+            # weaker signal than the source itself. Re-classifying those
+            # scattered eleven questions written from the 14.2 material across
+            # eight different sections, because a derivative example mentions
+            # vectors and a vector example mentions dot products.
+            owned = study.section_of(_Titled(title=row["material_title"]), {})
+            if owned:
+                section = owned
+            else:
+                section = classify(row["prompt"], row["topic"])
             if section is None:
                 unplaced.append(f"{row['topic']} :: {row['prompt'][:70]}")
                 continue

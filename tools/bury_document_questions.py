@@ -27,11 +27,23 @@ import study  # noqa: E402
 
 
 def offenders(db) -> list:
-    """Ready questions whose prompt the current guard would reject."""
+    """Ready questions the current save gate would now reject.
+
+    The explanation counts as much as the prompt. It is read at the moment the
+    learner is most receptive — right after a miss — so "The material states
+    that distance = speed x time" teaches them about the document instead of
+    about the mathematics. The gate and this sweep both only ever looked at
+    the prompt.
+    """
     return [
         row
-        for row in db.execute("SELECT id, topic, prompt FROM questions WHERE status='ready'")
-        if not study.tests_the_subject(row["prompt"]) or not study.is_self_contained(row["prompt"])
+        for row in db.execute(
+            "SELECT id, topic, prompt, explanation FROM questions WHERE status='ready'"
+        )
+        if not study.tests_the_subject(row["prompt"])
+        or not study.is_self_contained(row["prompt"])
+        or not study.tests_the_subject(row["explanation"] or "")
+        or study.has_plaintext_math(row["explanation"] or "")
     ]
 
 
