@@ -205,9 +205,16 @@ def main() -> int:
         if not args.dry_run:
             db.commit()
 
-    for section, _, _ in SECTIONS:
-        if counts.get(section):
-            print(f"  {section:5} {NAMES[section][:40]:42} {counts[section]:4}")
+    # SECTIONS names MA 261's sections. Another campaign's numbers are its
+    # own, so printing them through this table labelled STAT 350's 12.1 as
+    # "Parametric equations", which is MA 261's.
+    def order(section: str) -> tuple:
+        parts = section.split(".")
+        return (int(parts[0]), int(parts[1]) if len(parts) > 1 else 0)
+
+    for section in sorted(counts, key=order):
+        name = NAMES.get(section, "") if args.campaign == "MA 26100" else ""
+        print(f"  {section:6} {name[:40]:42} {counts[section]:4}")
     print(f"\n{tagged} tagged, {len(unplaced)} unplaced, of {len(rows)} total.")
     for line in unplaced[:12]:
         print(f"    unplaced: {line}")
