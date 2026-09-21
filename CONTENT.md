@@ -58,6 +58,58 @@ The source quote is what keeps the app honest: every answer can be traced back
 to something the learner actually imported, so a hallucinated question is
 visibly unsupported rather than quietly wrong.
 
+## Filling a class out
+
+Importing gives a class one pass of questions. Two gaps are left, and both make
+the path worse in ways that are hard to see from inside it.
+
+**A node with one question completes on one lucky answer.** The path advances on
+average mastery per topic, so a node holding a single question is finished the
+first time it is recalled. Running `study generate` again does not fix this: its
+coverage rule pushes the model toward an unexamined section, so a second pass
+mostly adds more one-question nodes.
+
+```bash
+python3 tools/deepen_bank.py "STAT 350" --dry-run   # how short is it
+python3 tools/deepen_bank.py "STAT 350" --target 4
+```
+
+**A node with no lesson skips the teach step** and goes straight to being
+quizzed, which turns a tutor into a test.
+
+```bash
+python3 tools/teach_nodes.py "STAT 350" --dry-run
+python3 tools/teach_nodes.py "STAT 350" --per-material 2
+```
+
+Both are resumable: they recompute what is missing from the database on every
+run, so stopping one loses only the batch in flight. Both take `--shard`/
+`--shards` to run several workers at once, split by material so two workers can
+never touch the same node. A whole class is hours of model calls.
+
+After a large generation run, typeset anything the model wrote in Unicode:
+
+```bash
+python3 tools/latexify_bank.py
+```
+
+`tests/test_bank_renders.py` runs against the live database and fails when a
+question would show raw notation to the learner, so it is the check that this
+worked.
+
+## Exam dates
+
+Ordering is by exam pressure, so a class with no upcoming exam sinks. Sync real
+dates rather than typing them:
+
+```bash
+python3 study.py exams            # all registered courses
+```
+
+Purdue writes a course two ways and the Registrar only answers to the long one:
+a learner registers `STAT 350`, the schedule publishes `STAT 35000`.
+`study.registrar_code` maps between them, so either spelling works.
+
 ## Math
 
 Write inline math as `\( ... \)` and display math as `$$ ... $$` or `\[ ... \]`.
@@ -73,6 +125,9 @@ covered by tests.
 | Concern | File |
 |---|---|
 | Scheduling, mastery, generation | `study.py` |
+| Unit headings | `titles.py` |
+| More questions per node | `deepen.py` |
+| The teach step | `lessons.py` |
 | HTTP API | `web.py` |
 | Transport | `web_static/api.js` |
 | Session loop (no DOM, portable) | `web_static/session.js` |
