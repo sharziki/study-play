@@ -5,6 +5,7 @@ several courses compete for the same study hour, the queue must reallocate
 toward whichever exam is soonest instead of splitting attention evenly.
 """
 
+import sqlite3
 import json
 import tempfile
 import unittest
@@ -267,3 +268,47 @@ class ExamSyncParsingTest(unittest.TestCase):
     def test_the_header_line_is_not_mistaken_for_an_exam(self):
         header = "Exams in the next 120 days — West Lafayette\n"
         self.assertEqual(self.PATTERN.findall(header), [])
+
+
+class RegistrarCodeTest(unittest.TestCase):
+    """Purdue writes the same course two ways, and the sync only understood one.
+
+    A student registers "STAT 350"; the Registrar publishes "STAT 35000" and is
+    only searchable by that. The sync filtered to a five-digit pattern and
+    silently dropped anything shorter, so STAT 350 was registered, had 63
+    materials, had an exam on 2026-10-07, and was skipped on every sync. With no
+    upcoming exam the class carried no pressure and sat at the bottom of the
+    path sixteen days before its midterm.
+    """
+
+    def test_a_spoken_code_becomes_the_published_one(self):
+        self.assertEqual(study.registrar_code("STAT 350"), "STAT 35000")
+
+    def test_an_already_published_code_is_unchanged(self):
+        for code in ("CS 18000", "MA 26100", "STAT 35000"):
+            self.assertEqual(study.registrar_code(code), code)
+
+    def test_spacing_and_case_do_not_matter(self):
+        self.assertEqual(study.registrar_code("stat350"), "STAT 35000")
+        self.assertEqual(study.registrar_code("  Ma 26100 "), "MA 26100")
+
+    def test_a_non_course_is_not_invented_into_one(self):
+        """EXAMPLES and PUTNAM are real campaigns with no Registrar entry."""
+        for value in ("EXAMPLES", "PUTNAM", "", "12345"):
+            self.assertIsNone(study.registrar_code(value))
+
+    def test_the_mapping_is_idempotent(self):
+        once = study.registrar_code("STAT 350")
+        self.assertEqual(study.registrar_code(once), once)
+
+    def test_a_registrar_answer_resolves_back_to_the_registered_course(self):
+        """The schedule answers in its own form, so the exam has to be filed
+        against the row the learner actually created."""
+        db = sqlite3.connect(":memory:")
+        db.row_factory = sqlite3.Row
+        db.execute("CREATE TABLE courses (id INTEGER PRIMARY KEY, code TEXT)")
+        db.executemany("INSERT INTO courses(code) VALUES (?)",
+                       [("STAT 350",), ("CS 18000",), ("EXAMPLES",)])
+        self.assertEqual(study.local_code(db, "STAT 35000"), "STAT 350")
+        self.assertEqual(study.local_code(db, "CS 18000"), "CS 18000")
+        self.assertIsNone(study.local_code(db, "PHYS 17200"))

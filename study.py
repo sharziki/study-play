@@ -879,6 +879,40 @@ def uncovered_topics(db: sqlite3.Connection, material: sqlite3.Row) -> list[str]
     return missing
 
 
+def registrar_code(code: str) -> str | None:
+    """A course code in the five-digit form the Registrar publishes.
+
+    Purdue writes the same course two ways. A student says "STAT 350" and the
+    Registrar says "STAT 35000", and the schedule is only searchable by the
+    second. The sync filtered to a five-digit pattern and silently dropped
+    anything else, so STAT 350 was registered, had material, had an exam on
+    2026-10-07 — and was skipped on every sync, leaving the class with no
+    upcoming exam and therefore no pressure. It sat at the bottom of the path
+    sixteen days before its midterm.
+
+    Returns None when the value is not a course code at all, e.g. "EXAMPLES".
+    """
+    match = re.match(r"^([A-Z]{2,5})\s*(\d{3,5})$", (code or "").upper().strip())
+    if not match:
+        return None
+    subject, number = match.group(1), match.group(2)
+    # Three digits is the spoken form; the Registrar pads the level out to five.
+    return f"{subject} {number.ljust(5, '0')}"
+
+
+def local_code(db: sqlite3.Connection, registrar: str) -> str | None:
+    """The registered course code that a Registrar code refers to.
+
+    The inverse of `registrar_code`, resolved against what is actually
+    registered rather than by unpadding, because both "STAT 350" and
+    "STAT 35000" are legitimate things for a learner to have typed.
+    """
+    for row in db.execute("SELECT code FROM courses"):
+        if registrar_code(row["code"]) == registrar:
+            return row["code"]
+    return None
+
+
 def sync_exams(course_filter: list[str] | None = None) -> None:
     """Import real exam dates from the Registrar schedule via purdue-mcp.
 
@@ -907,7 +941,8 @@ def sync_exams(course_filter: list[str] | None = None) -> None:
             "SELECT code FROM courses WHERE archived=0" if _has_courses(db) else "SELECT DISTINCT campaign AS code FROM materials"
         ).fetchall()
     wanted = course_filter or [row["code"] for row in rows]
-    codes = [c for c in wanted if re.match(r"^[A-Z]{2,5}\s*\d{5}$", c.upper().strip())]
+    codes = [registrar_code(c) for c in wanted]
+    codes = [c for c in codes if c]
     if not codes:
         raise SystemExit(
             "No Purdue course codes registered. Add one first, e.g.\n"
@@ -957,8 +992,10 @@ def sync_exams(course_filter: list[str] | None = None) -> None:
     found = 0
     with connect() as db:
         for subject, number, date, kind in pattern.findall(body):
-            code = f"{subject} {number}"
-            course = db.execute("SELECT id FROM courses WHERE code=?", (code,)).fetchone()
+            # The Registrar answers in its own five-digit form, so the row it
+            # belongs to is found by mapping back to what the learner registered.
+            code = local_code(db, f"{subject} {number}")
+            course = db.execute("SELECT id FROM courses WHERE code=?", (code,)).fetchone() if code else None
             if course is None:
                 continue
             title = f"{'Evening exam' if kind == 'evening' else 'Final exam'} {date}"
