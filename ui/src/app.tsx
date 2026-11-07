@@ -69,6 +69,14 @@ export const App = () => {
   // rather than three. `?start=CS 18000` pins it to one class, so a class with
   // a distant exam is still reachable in one tap during a week when another
   // class dominates the queue.
+  // `?lesson=N` opens one teach step directly. A home-screen shortcut can
+  // point at the lesson being worked through, and it is what makes a single
+  // lesson checkable in a browser without clicking down the whole path.
+  useEffect(() => {
+    const lesson = new URLSearchParams(window.location.search).get("lesson");
+    if (lesson && Number.isFinite(Number(lesson))) setTeaching(Number(lesson));
+  }, []);
+
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("start");
     if (requested === null) return;
